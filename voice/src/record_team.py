@@ -24,7 +24,7 @@ WORDS = ["zero", "one", "two", "three", "four",
 
 
 def next_index(name: str, digit: int) -> int:
-    """Continue numbering after existing files (supports multiple sessions)."""
+    """Return how many clips already saved for this (name, digit)."""
     indices = []
     for f in OUT_DIR.glob(f"{digit}_{name}_*.wav"):
         indices.append(int(f.stem.split("_")[2]))
@@ -45,7 +45,6 @@ def is_good(audio: np.ndarray) -> bool:
     if peak < 0.02:
         print("   too quiet - speak louder or move closer. Retrying...")
         return False
-    # Count samples at (almost) full scale: a few = fine, many = real clipping
     clipped = int(np.sum(np.abs(audio) >= 0.999))
     if clipped > 20:
         print(f"   clipped ({clipped} samples) - lower mic volume. Retrying...")
@@ -74,21 +73,35 @@ def main():
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Shuffle digits inside each round so the order is not predictable
+    # Build full shuffled plan
     plan = []
     for _ in range(args.reps):
         digits = list(range(10))
         random.shuffle(digits)
         plan.extend(digits)
 
-    print(f"Recording {len(plan)} clips for '{args.name}'.")
+    # Resume: skip clips that are already saved on disk
+    already = {d: next_index(args.name, d) for d in range(10)}
+    seen = {d: 0 for d in range(10)}
+    remaining = []
+    for digit in plan:
+        if seen[digit] < already[digit]:
+            seen[digit] += 1   # already recorded, skip
+        else:
+            remaining.append(digit)
+
+    total_done = sum(already.values())
+    if total_done > 0:
+        print(f"Resuming from checkpoint: {total_done} clips already saved, {len(remaining)} remaining.")
+
+    print(f"Recording {len(remaining)} clips for '{args.name}'.")
     print("Say the digit in ENGLISH when you see 'SPEAK'. Quiet room please.")
     input("Press Enter to start...")
 
-    done = 0
-    for digit in plan:
+    done = total_done
+    for digit in remaining:
         while True:
-            print(f"[{done + 1}/{len(plan)}] Next: {digit} ({WORDS[digit]})")
+            print(f"[{done + 1}/{args.reps * 10}] Next: {digit} ({WORDS[digit]})")
             time.sleep(0.5)
             print("   >>> SPEAK")
             audio = record_one()
