@@ -1,21 +1,24 @@
 """Isolated-word command recognizer (Task 4).
 
-Words are recognised with MFCC (mean/std) + ZCR + RMS features and an SVM.
+Words are recognised with time-aware MFCC features + ZCR + RMS and an SVM.
 Runs at 16 kHz (Speech Commands native rate), independent of the 8 kHz
 speaker-verification pipeline.
+
+An extra "unknown" class (other words from Speech Commands) lets the
+recognizer reject words that are not commands instead of forcing one of
+the six command words.
 """
 import warnings
-from pathlib import Path
 
 import joblib
 import librosa
 import numpy as np
 import soundfile as sf
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 
 from config import DATA_DIR, MODELS_DIR, RANDOM_STATE
@@ -25,10 +28,13 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 CMD_SR = 16000
 CMD_SAMPLES = CMD_SR            # fixed 1 second
 CMD_WORDS = ["on", "off", "go", "stop", "yes", "no"]
+UNKNOWN_WORDS = ["cat", "dog", "bed", "bird", "happy", "house", "tree", "wow"]
+UNKNOWN_LABEL = "unknown"
+MAX_UNKNOWN_PER_WORD = 300      # ~2400 total, similar size to one command class
 CMD_DIR = DATA_DIR / "speech_commands"
-MAX_PER_WORD = 1500             # cap per word to keep training fast
 N_MFCC = 13
 N_FFT, HOP = 512, 160           # 32 ms window, 10 ms hop at 16 kHz
+N_SEGMENTS = 4                  # temporal segments per word
 
 
 def preprocess_cmd(audio: np.ndarray) -> np.ndarray:
@@ -42,9 +48,6 @@ def preprocess_cmd(audio: np.ndarray) -> np.ndarray:
     if audio.size >= CMD_SAMPLES:
         return audio[:CMD_SAMPLES].astype(np.float32)
     return np.pad(audio, (0, CMD_SAMPLES - audio.size)).astype(np.float32)
-
-
-N_SEGMENTS = 4   # temporal segments per word
 
 
 def cmd_features(audio: np.ndarray) -> np.ndarray:
@@ -79,17 +82,27 @@ def _read_list(name: str) -> set:
 def load_dataset():
     """Load clips per word, split by the OFFICIAL lists (speaker-disjoint).
 
+    Command words keep their own label; the extra words are all labelled
+    "unknown" (capped per word to keep the classes balanced).
+
     Returns dict: split -> (X, y) for 'train', 'val', 'test'.
     """
     val_set = _read_list("validation_list.txt")
     test_set = _read_list("testing_list.txt")
     data = {s: ([], []) for s in ("train", "val", "test")}
 
-    for word in CMD_WORDS:
+    # (folder name, label, max files or None)
+    jobs = [(w, w, None) for w in CMD_WORDS] + \
+           [(w, UNKNOWN_LABEL, MAX_UNKNOWN_PER_WORD) for w in UNKNOWN_WORDS]
+
+    for word, label, cap in jobs:
         folder = CMD_DIR / word
         if not folder.exists():
             raise SystemExit(f"Missing folder: {folder}")
-        for f in tqdm(sorted(folder.glob("*.wav")), desc=f"Extracting '{word}'"):
+        files = sorted(folder.glob("*.wav"))
+        if cap is not None:
+            files = files[:cap]
+        for f in tqdm(files, desc=f"Extracting '{word}' -> {label}"):
             rel = f"{word}/{f.name}"
             split = "val" if rel in val_set else "test" if rel in test_set else "train"
             audio, sr = sf.read(str(f), dtype="float32")
@@ -98,7 +111,7 @@ def load_dataset():
             if sr != CMD_SR:
                 audio = librosa.resample(audio, orig_sr=sr, target_sr=CMD_SR)
             data[split][0].append(cmd_features(audio))
-            data[split][1].append(word)
+            data[split][1].append(label)
 
     return {s: (np.vstack(X), np.array(y)) for s, (X, y) in data.items()}
 
@@ -141,11 +154,17 @@ class CommandRecognizer:
         self.min_confidence = min_confidence
 
     def recognize(self, audio_16k: np.ndarray):
-        """Return (word or None, confidence). None = not confident enough."""
+        """Return (word or None, confidence).
+
+        None = predicted "unknown" (not a command) or confidence too low.
+        """
         proba = self.model.predict_proba(cmd_features(audio_16k).reshape(1, -1))[0]
         i = int(np.argmax(proba))
         conf = float(proba[i])
-        return (self.words[i] if conf >= self.min_confidence else None), conf
+        word = self.words[i]
+        if word == UNKNOWN_LABEL or conf < self.min_confidence:
+            return None, conf
+        return word, conf
 
 
 if __name__ == "__main__":
