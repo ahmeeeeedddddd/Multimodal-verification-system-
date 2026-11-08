@@ -17,8 +17,7 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True)
 SAMPLE_RATE = 8000        # FSDD is recorded at 8 kHz
 DURATION_SEC = 1.0        # every clip is padded/cropped to this length
 N_SAMPLES = int(SAMPLE_RATE * DURATION_SEC)
-TOP_DB = 25               # silence-trimming threshold (dB below peak)
-
+TOP_DB = 15               # silence-trimming threshold (dB below peak)
 # ---------------------------------------------------------------
 # Feature settings
 # ---------------------------------------------------------------
