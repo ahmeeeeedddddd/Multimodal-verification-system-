@@ -2,7 +2,14 @@
 
 Approach: one closed-set multiclass classifier over the ENROLLED speakers.
 genuine_probability(claimed) = P(claimed | audio).
+
+Split strategy (session-aware):
+  * FSDD speakers : random stratified train/val/test.
+  * Team speakers : team_voice -> train; live_test -> val/test (50/50).
+  * Unknown speakers (never trained on) are used only for impostor trials.
 """
+import warnings
+
 import joblib
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
@@ -11,12 +18,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from config import MODELS_DIR, RANDOM_STATE
-from dataset import (ENROLLED_SPEAKERS, UNKNOWN_SPEAKERS, extract_all,
-                     split_enrolled, split_unknown, make_trials)
+from config import FSDD_DIR, MODELS_DIR, RANDOM_STATE
+from dataset import (FSDD_ENROLLED, team_speakers, UNKNOWN_SPEAKERS,
+                     extract_all, split_by_session, split_unknown,
+                     make_trials)
 from metrics_basic import compute_eer, auc, far_frr
 
-import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
@@ -51,10 +58,12 @@ def build_models():
 
 def main():
     # ---- data ----
-    enrolled = extract_all(ENROLLED_SPEAKERS)
-    unknown = extract_all(UNKNOWN_SPEAKERS)
-    train, val, test = split_enrolled(enrolled)
+    team_ids = team_speakers()
+    print("Enrolled identities:", FSDD_ENROLLED + team_ids)
+    train, val, test = split_by_session(FSDD_ENROLLED, team_ids)
+    unknown = extract_all(UNKNOWN_SPEAKERS, folders=[FSDD_DIR])
     unk_val, unk_test = split_unknown(unknown)
+    print(f"train={len(train.X)} val={len(val.X)} test={len(test.X)}")
 
     # ---- tune on TRAIN only (stratified CV) ----
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)

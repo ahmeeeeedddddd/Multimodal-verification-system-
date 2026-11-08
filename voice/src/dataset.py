@@ -2,7 +2,8 @@
 
 Design:
   * ENROLLED speakers  -> the system is trained on them (train/val/test split
-    of their recordings, stratified by spoken digit).
+    of their recordings, stratified by spoken digit). This includes the FSDD
+    speakers listed below AND every team member found in data/team_voice.
   * UNKNOWN speakers   -> never seen in training; used only to build
     "unknown impostor" trials in val/test.
 """
@@ -12,12 +13,27 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from config import FSDD_DIR, RANDOM_STATE
+from config import DATA_DIR, FSDD_DIR, RANDOM_STATE
 from preprocessing import preprocess_file
 from features import extract_voice_features
+LIVE_DIR = DATA_DIR / "live_test"
 
-ENROLLED_SPEAKERS = ["george", "jackson", "lucas", "nicolas"]
+TEAM_DIR = DATA_DIR / "team_voice"
+
+FSDD_ENROLLED = ["george", "jackson", "lucas", "nicolas"]
 UNKNOWN_SPEAKERS = ["theo", "yweweler"]
+
+
+def team_speakers():
+    """Discover team members from file names in data/team_voice."""
+    if not TEAM_DIR.exists():
+        return []
+    return sorted({f.stem.split("_")[1] for f in TEAM_DIR.glob("*.wav")})
+
+
+def enrolled_speakers():
+    """All enrolled identities: FSDD enrolled + team members."""
+    return FSDD_ENROLLED + team_speakers()
 
 
 @dataclass
@@ -28,17 +44,52 @@ class VoiceDataset:
     digit: np.ndarray      # (n,) spoken digit per recording
 
 
-def extract_all(speakers) -> VoiceDataset:
-    """Preprocess + extract features for every recording of given speakers."""
+def extract_all(speakers, folders=None) -> VoiceDataset:
+    """Preprocess + extract features for recordings of the given speakers.
+
+    folders: which folders to read (default: FSDD + team_voice).
+    """
+    if folders is None:
+        folders = [FSDD_DIR] + ([TEAM_DIR] if TEAM_DIR.exists() else [])
     X, spk, dig = [], [], []
-    files = sorted(f for f in FSDD_DIR.glob("*.wav")
+    files = sorted(f for folder in folders for f in folder.glob("*.wav")
                    if f.stem.split("_")[1] in speakers)
-    for f in tqdm(files, desc=f"Extracting {speakers}"):
+    for f in tqdm(files, desc=f"Extracting {len(speakers)} speakers"):
         digit, speaker, _ = f.stem.split("_")
         X.append(extract_voice_features(preprocess_file(f)))
         spk.append(speaker)
         dig.append(int(digit))
     return VoiceDataset(np.vstack(X), np.array(spk), np.array(dig))
+
+
+def split_by_session(fsdd_ids, team_ids):
+    """Session-aware split.
+
+    * FSDD speakers: random stratified train/val/test (as before).
+    * Team speakers: team_voice -> train only;
+                     live_test  -> split 50/50 into val and test.
+    Returns (train, val, test) VoiceDatasets over ALL enrolled speakers.
+    """
+    fsdd = extract_all(fsdd_ids, folders=[FSDD_DIR])
+    f_train, f_val, f_test = split_enrolled(fsdd)
+
+    t_train = extract_all(team_ids, folders=[TEAM_DIR])
+    live = extract_all(team_ids, folders=[LIVE_DIR])
+
+    # split live recordings, stratified by (speaker, digit) when possible
+    idx = np.arange(len(live.X))
+    strata = np.array([f"{s}_{d}" for s, d in zip(live.speaker, live.digit)])
+    idx_val, idx_test = train_test_split(
+        idx, test_size=0.5, stratify=strata, random_state=RANDOM_STATE)
+    l_val, l_test = subset(live, idx_val), subset(live, idx_test)
+
+    def merge(a, b):
+        return VoiceDataset(np.vstack([a.X, b.X]),
+                            np.concatenate([a.speaker, b.speaker]),
+                            np.concatenate([a.digit, b.digit]))
+
+    return (merge(f_train, t_train), merge(f_val, l_val),
+            merge(f_test, l_test))
 
 
 def subset(ds: VoiceDataset, idx) -> VoiceDataset:

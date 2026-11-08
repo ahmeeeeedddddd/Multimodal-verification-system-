@@ -1,10 +1,12 @@
 """Sanity check for splits and trial generation."""
 from collections import Counter
 
-from dataset import (ENROLLED_SPEAKERS, UNKNOWN_SPEAKERS, extract_all,
+from dataset import (enrolled_speakers, UNKNOWN_SPEAKERS, extract_all,
                      split_enrolled, split_unknown, make_trials)
 
-enrolled = extract_all(ENROLLED_SPEAKERS)
+enrolled_ids = enrolled_speakers()
+print("Enrolled identities:", enrolled_ids)
+enrolled = extract_all(enrolled_ids)
 unknown = extract_all(UNKNOWN_SPEAKERS)
 
 train, val, test = split_enrolled(enrolled)
