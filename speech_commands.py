@@ -55,6 +55,7 @@ USER_ROLES = {
     # Team members (Bonus 3)
     1000: "admin",   # ahmed
     1001: "user",    # mohamed
+    1002: "user",    # basmala
 }
 
 

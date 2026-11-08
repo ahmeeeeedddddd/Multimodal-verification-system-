@@ -71,7 +71,7 @@ if not enrolled_ids:
     enrolled_ids = [28, 29, 30, 31, 32, 33, 34]
 
 # Add team members if their model is loaded
-_team_label_map = {1000: "1000 (Ahmed)", 1001: "1001 (Mohamed)"}
+_team_label_map = {1000: "1000 (Ahmed)", 1001: "1001 (Mohamed)", 1002: "1002 (Basmala)"}
 _team_ids = [tid for tid in [1000, 1001] if tid not in enrolled_ids]
 _team_options = [_team_label_map[t] for t in _team_ids]
 
@@ -173,8 +173,14 @@ with tab1:
                 status_placeholder = st.empty()
 
                 if run_live_stream:
+                    import time
                     cap = cv2.VideoCapture(0)
                     from face_features import face_cascade
+                    last_eval_time = 0.0
+                    held_score = 0.0
+                    held_status = "Waiting for face..."
+                    held_acc = False
+
                     while run_live_stream and cap.isOpened():
                         ret, frame = cap.read()
                         if not ret:
@@ -184,30 +190,50 @@ with tab1:
                         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                         faces = face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(60, 60))
 
-                        prob = 0.0
-                        is_acc = False
+                        now = time.time()
                         if len(faces) > 0:
                             x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
                             face_crop = frame[y:y+fh, x:x+fw]
-                            prob = verifier.compute_face_score(face_crop, target_id)
-                            is_acc = prob >= verifier.theta_high
 
-                            box_col = (0, 255, 0) if is_acc else ((0, 165, 255) if prob >= verifier.theta_low else (0, 0, 255))
+                            # 5-second hold evaluation window to prevent overwriting/flickering
+                            if (now - last_eval_time) >= 5.0 or last_eval_time == 0.0:
+                                last_eval_time = now
+                                held_score = verifier.compute_face_score(face_crop, target_id)
+                                held_acc = held_score >= verifier.theta_high
+                                if held_acc:
+                                    held_status = f"✅ ACCEPTED (Score: {held_score*100:.1f}%)"
+                                elif held_score >= verifier.theta_low:
+                                    held_status = f"⚠️ AMBIGUOUS - Stage 2 Fusion Needed (Score: {held_score*100:.1f}%)"
+                                else:
+                                    held_status = f"❌ REJECTED (Score: {held_score*100:.1f}%)"
+
+                            # Display bounding box with held decision
+                            remaining = max(0.0, 5.0 - (now - last_eval_time))
+                            box_col = (0, 255, 0) if held_acc else ((0, 165, 255) if held_score >= verifier.theta_low else (0, 0, 255))
                             cv2.rectangle(frame, (x, y), (x+fw, y+fh), box_col, 2)
-                            cv2.putText(frame, f"Score: {prob*100:.1f}%", (x, max(20, y-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_col, 2)
+                            cv2.putText(frame, f"{held_status.split()[0]} {held_score*100:.1f}% (lock: {remaining:.1f}s)", (x, max(25, y-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_col, 2)
 
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         stream_placeholder.image(frame_rgb, use_container_width=True)
-                        status_msg = f"**Status:** {'✅ ACCEPTED' if is_acc else ('⚠️ AMBIGUOUS (Stage 2 Fusion needed)' if prob >= verifier.theta_low else '❌ REJECTED')} | Face Score: {prob*100:.1f}%"
-                        status_placeholder.markdown(status_msg)
+                        status_placeholder.info(f"**Verification Result (5s Stable Hold):** {held_status}")
 
                     cap.release()
 
-            uploaded_audio = st.file_uploader("Upload Voice Recording (.wav)", type=["wav"])
-            if uploaded_audio is not None:
-                query_audio, sr = sf.read(uploaded_audio)
-                st.audio(uploaded_audio)
-            else:
+            st.markdown("##### 🎙️ Voice & Spoken Command Input")
+            voice_tab_mic, voice_tab_upload, voice_tab_sim = st.tabs(["🔴 Live Microphone", "📁 Upload .WAV", "⌨️ Command Simulator"])
+
+            with voice_tab_mic:
+                audio_mic = st.audio_input("Click to record your voice command (e.g. say 'unlock' or 'open'):")
+                if audio_mic is not None:
+                    query_audio, sr = sf.read(audio_mic)
+
+            with voice_tab_upload:
+                uploaded_audio = st.file_uploader("Upload Voice Recording (.wav)", type=["wav"], key="uploader_wav")
+                if uploaded_audio is not None:
+                    query_audio, sr = sf.read(uploaded_audio)
+                    st.audio(uploaded_audio)
+
+            with voice_tab_sim:
                 spoken_command = st.selectbox("Simulate Spoken Word for Recognizer", COMMAND_WORDS, index=0)
 
             if enable_fingerprint:
