@@ -67,13 +67,28 @@ def split_by_session(fsdd_ids, team_ids):
 
     * FSDD speakers: random stratified train/val/test.
     * Team speakers: team_voice -> train only;
-                     live_test  -> split 50/50 into val and test.
+                     live_test  -> split 50/50 into val and test
+                                   (skipped if live_test is missing or empty).
     Returns (train, val, test) VoiceDatasets over ALL enrolled speakers.
     """
     fsdd = extract_all(fsdd_ids, folders=[FSDD_DIR])
     f_train, f_val, f_test = split_enrolled(fsdd)
 
     t_train = extract_all(team_ids, folders=[TEAM_DIR])
+
+    def merge(a, b):
+        if len(a.X) == 0:
+            return b
+        if len(b.X) == 0:
+            return a
+        return VoiceDataset(np.vstack([a.X, b.X]),
+                            np.concatenate([a.speaker, b.speaker]),
+                            np.concatenate([a.digit, b.digit]))
+
+    # Only use live_test if it exists and contains recordings
+    if not LIVE_DIR.exists() or not any(LIVE_DIR.glob("*.wav")):
+        return (merge(f_train, t_train), f_val, f_test)
+
     live = extract_all(team_ids, folders=[LIVE_DIR])
 
     # Warn about team members who have no live recordings (not evaluated)
@@ -94,15 +109,8 @@ def split_by_session(fsdd_ids, team_ids):
         idx, test_size=0.5, stratify=strata, random_state=RANDOM_STATE)
     l_val, l_test = subset(live, idx_val), subset(live, idx_test)
 
-    def merge(a, b):
-        return VoiceDataset(np.vstack([a.X, b.X]),
-                            np.concatenate([a.speaker, b.speaker]),
-                            np.concatenate([a.digit, b.digit]))
-
     return (merge(f_train, t_train), merge(f_val, l_val),
             merge(f_test, l_test))
-
-
 def subset(ds: VoiceDataset, idx) -> VoiceDataset:
     return VoiceDataset(ds.X[idx], ds.speaker[idx], ds.digit[idx])
 

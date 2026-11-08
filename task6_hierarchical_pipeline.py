@@ -121,7 +121,7 @@ def main():
     clf_fusion = SVC(kernel="rbf", C=5.0, probability=True, random_state=42).fit(X_tr_fusion, y_tr_fusion)
 
     # 3. Validation Phase: Tune Upper & Lower Thresholds
-    print("\n[3/5] Tuning Stage 1 Upper (θ_high) and Lower (θ_low) Thresholds on Validation Data (IDs 21-27)...")
+    print("\n[3/5] Tuning Stage 1 Upper (theta_high) and Lower (theta_low) Thresholds on Validation Data (IDs 21-27)...")
     X_val_face, y_val, _, _ = build_trial_pairs(
         face_features, face_labels, enrolled_ids=val_ids, impostor_ids=val_ids, seed=42
     )
@@ -140,8 +140,8 @@ def main():
     theta_low, theta_high, tune_metrics = tune_hierarchical_thresholds(
         y_val, val_face_probs, val_fusion_probs, theta_fusion=opt_thr_fusion
     )
-    print(f"  -> Optimal θ_low  = {theta_low:.3f}")
-    print(f"  -> Optimal θ_high = {theta_high:.3f}")
+    print(f"  -> Optimal theta_low  = {theta_low:.3f}")
+    print(f"  -> Optimal theta_high = {theta_high:.3f}")
     print(f"  -> Validation Acc = {tune_metrics['accuracy']:.4f} | Stage 2 Escalation Rate = {tune_metrics['stage2_fraction']*100:.1f}%")
 
     # 4. Evaluation on Identical Test Trials (IDs 28-34 Enrolled, 28-39 Impostors)
