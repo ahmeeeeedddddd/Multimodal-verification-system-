@@ -1,8 +1,12 @@
 venv/
-data/
 __pycache__/
 *.py[cod]
 *$py.class
 .ipynb_checkpoints/
 .vscode/
 .idea/
+
+# Large datasets: each member downloads these himself
+data/speech_commands/
+
+# Everything else under data/ (FSDD, team_voice, live_test, faces) is tracked
