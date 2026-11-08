@@ -65,7 +65,7 @@ def extract_all(speakers, folders=None) -> VoiceDataset:
 def split_by_session(fsdd_ids, team_ids):
     """Session-aware split.
 
-    * FSDD speakers: random stratified train/val/test (as before).
+    * FSDD speakers: random stratified train/val/test.
     * Team speakers: team_voice -> train only;
                      live_test  -> split 50/50 into val and test.
     Returns (train, val, test) VoiceDatasets over ALL enrolled speakers.
@@ -76,9 +76,20 @@ def split_by_session(fsdd_ids, team_ids):
     t_train = extract_all(team_ids, folders=[TEAM_DIR])
     live = extract_all(team_ids, folders=[LIVE_DIR])
 
-    # split live recordings, stratified by (speaker, digit) when possible
+    # Warn about team members who have no live recordings (not evaluated)
+    live_speakers = set(live.speaker)
+    for s in team_ids:
+        if s not in live_speakers:
+            print(f"WARNING: '{s}' has no files in live_test "
+                  f"-> trained but NOT evaluated. Run record_live.py.")
+
+    # Stratify by (speaker, digit) if every group has >= 2 samples,
+    # otherwise fall back to stratifying by speaker only.
     idx = np.arange(len(live.X))
     strata = np.array([f"{s}_{d}" for s, d in zip(live.speaker, live.digit)])
+    _, counts = np.unique(strata, return_counts=True)
+    if counts.min() < 2:
+        strata = live.speaker
     idx_val, idx_test = train_test_split(
         idx, test_size=0.5, stratify=strata, random_state=RANDOM_STATE)
     l_val, l_test = subset(live, idx_val), subset(live, idx_test)

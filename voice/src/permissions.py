@@ -26,8 +26,8 @@ WORD_TO_COMMAND = {
 # identity -> role (edit names to match your enrolled team members)
 USER_ROLES = {
     "basmala": "admin",
-    # "mohamed": "user",
-    # "<name>": "user",
+     "mohamed": "user",
+    # "ahmed": "user",
 }
 
 
