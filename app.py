@@ -158,11 +158,50 @@ with tab1:
 
         else:
             # Live Camera
-            camera_img = st.camera_input("Capture Face from Webcam")
-            if camera_img is not None:
-                bytes_data = camera_img.getvalue()
-                cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-                query_face = cv_img
+            cam_mode = st.radio("Webcam Input Method", ["📷 Photo Snapshot", "📹 Continuous Live Stream (Bonus 2)"], horizontal=True)
+
+            if cam_mode == "📷 Photo Snapshot":
+                camera_img = st.camera_input("Capture Face from Webcam")
+                if camera_img is not None:
+                    bytes_data = camera_img.getvalue()
+                    cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+                    query_face = cv_img
+            else:
+                st.info("Continuous live video feed from webcam with real-time verification.")
+                run_live_stream = st.checkbox("🟢 Activate Live Webcam Stream", value=False)
+                stream_placeholder = st.empty()
+                status_placeholder = st.empty()
+
+                if run_live_stream:
+                    cap = cv2.VideoCapture(0)
+                    from face_features import face_cascade
+                    while run_live_stream and cap.isOpened():
+                        ret, frame = cap.read()
+                        if not ret:
+                            st.warning("Could not read frame from webcam.")
+                            break
+
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        faces = face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(60, 60))
+
+                        prob = 0.0
+                        is_acc = False
+                        if len(faces) > 0:
+                            x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
+                            face_crop = frame[y:y+fh, x:x+fw]
+                            prob = verifier.compute_face_score(face_crop, target_id)
+                            is_acc = prob >= verifier.theta_high
+
+                            box_col = (0, 255, 0) if is_acc else ((0, 165, 255) if prob >= verifier.theta_low else (0, 0, 255))
+                            cv2.rectangle(frame, (x, y), (x+fw, y+fh), box_col, 2)
+                            cv2.putText(frame, f"Score: {prob*100:.1f}%", (x, max(20, y-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_col, 2)
+
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        stream_placeholder.image(frame_rgb, use_container_width=True)
+                        status_msg = f"**Status:** {'✅ ACCEPTED' if is_acc else ('⚠️ AMBIGUOUS (Stage 2 Fusion needed)' if prob >= verifier.theta_low else '❌ REJECTED')} | Face Score: {prob*100:.1f}%"
+                        status_placeholder.markdown(status_msg)
+
+                    cap.release()
 
             uploaded_audio = st.file_uploader("Upload Voice Recording (.wav)", type=["wav"])
             if uploaded_audio is not None:
