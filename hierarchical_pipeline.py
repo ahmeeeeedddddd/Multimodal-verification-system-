@@ -127,8 +127,8 @@ class HierarchicalVerifier:
                 - reason: str (explanation of the decision path)
         """
         # Ensure feature extraction if raw face image is provided
-        if face_input.ndim == 2 and face_input.shape[0] != 1 and face_input.shape[1] != 1:
-            # Likely 2D raw image
+        if face_input.ndim in (2, 3) and face_input.shape[0] > 1 and face_input.shape[1] > 1:
+            # Likely 2D or 3D raw image
             extractor = self.face_bundle["extractor"]
             u8, norm = preprocess_face(face_input)
             face_feat = extractor.extract(u8, norm)

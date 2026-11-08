@@ -38,8 +38,14 @@ st.set_page_config(
 # Load Pipeline and Models
 @st.cache_resource
 def load_system():
+    # Use team face model if available (includes ahmed + mohamed)
+    face_model_path = (
+        "saved_models/face_verifier_team.pkl"
+        if os.path.exists("saved_models/face_verifier_team.pkl")
+        else "saved_models/face_verifier.pkl"
+    )
     verifier = HierarchicalVerifier(
-        face_bundle_path="saved_models/face_verifier.pkl",
+        face_bundle_path=face_model_path,
         fusion_bundle_path="saved_models/fusion_verifier.pkl",
         fingerprint_bundle_path="saved_models/fingerprint_verifier.pkl"
     )
@@ -64,9 +70,15 @@ enrolled_ids = verifier.enrolled_identities
 if not enrolled_ids:
     enrolled_ids = [28, 29, 30, 31, 32, 33, 34]
 
+# Add team members if their model is loaded
+_team_label_map = {1000: "1000 (Ahmed)", 1001: "1001 (Mohamed)"}
+_team_ids = [tid for tid in [1000, 1001] if tid not in enrolled_ids]
+_team_options = [_team_label_map[t] for t in _team_ids]
+
 claimed_id = st.sidebar.selectbox(
     "👤 Claimed Identity",
-    options=enrolled_ids + ["35 (Impostor)", "36 (Impostor)"],
+    options=enrolled_ids + _team_ids + ["35 (Impostor)", "36 (Impostor)"],
+    format_func=lambda x: _team_label_map.get(x, str(x)),
     index=0
 )
 # Normalize claimed ID to integer if possible
@@ -149,8 +161,8 @@ with tab1:
             camera_img = st.camera_input("Capture Face from Webcam")
             if camera_img is not None:
                 bytes_data = camera_img.getvalue()
-                cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_GRAYSCALE)
-                query_face = cv2.resize(cv_img, (64, 64))
+                cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+                query_face = cv_img
 
             uploaded_audio = st.file_uploader("Upload Voice Recording (.wav)", type=["wav"])
             if uploaded_audio is not None:

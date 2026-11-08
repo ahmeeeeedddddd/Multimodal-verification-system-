@@ -44,14 +44,17 @@ USER_ROLES = {
     "User_32": "admin",
     "User_33": "user",
     "User_34": "guest",
-    # numeric mapped IDs
+    # numeric mapped IDs (Olivetti)
     28: "admin",
     29: "user",
     30: "user",
     31: "user",
     32: "admin",
     33: "user",
-    34: "guest"
+    34: "guest",
+    # Team members (Bonus 3)
+    1000: "admin",   # ahmed
+    1001: "user",    # mohamed
 }
 
 

@@ -17,8 +17,10 @@ def preprocess_face(img, target_size=(64, 64)):
         gray = img_uint8
 
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
+    if len(faces) == 0:
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=2, minSize=(30, 30))
     if len(faces) > 0:
-        x, y, w, h = faces[0]
+        x, y, w, h = max(faces, key=lambda b: b[2] * b[3])
         gray = gray[y:y+h, x:x+w]
 
     resized = cv2.resize(gray, target_size, interpolation=cv2.INTER_AREA)
