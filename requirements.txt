@@ -8,7 +8,8 @@ matplotlib
 joblib
 sounddevice
 tqdm
-# Task 2 – Fingerprint module
 opencv-python
 scikit-image
-kaggle
+streamlit
+facenet-pytorch
+SpeechRecognition

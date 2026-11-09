@@ -1,9 +1,12 @@
-"""Bonus 3 — Retrain face verifier including team member faces.
+"""02 — Train Stage 1 Face Verification Model.
 
-Loads Olivetti (baseline) + team faces from data/team_faces/<name>/*.jpg
-Uses robust preprocessing and StandardScaler + RBF SVM pipeline for robust lighting-invariant verification.
-Saves to saved_models/face_verifier_team.pkl.
+Loads Olivetti (baseline 40 subjects) + enrolled team member faces.
+Extracts HOG + LBP + PCA representations and trains an RBF SVM + StandardScaler pipeline.
+Saves:
+- saved_models/face_verifier_team.pkl (with all subjects + team members)
+- saved_models/face_verifier.pkl
 """
+
 import os
 import cv2
 import joblib
@@ -45,7 +48,6 @@ def load_team_faces():
                 continue
             u8, norm = preprocess_face(img)
             if u8 is None:
-                print(f"  [Filter] Skipped invalid crop: {person_dir.name}/{f.name}")
                 continue
 
             u8_list.append(u8)
@@ -54,7 +56,7 @@ def load_team_faces():
             names.append(name)
             valid_count += 1
 
-        print(f"  Loaded {valid_count}/{len(img_files)} valid faces for '{name}' (label={label_id})")
+        print(f"  [02-Face] Loaded {valid_count}/{len(img_files)} faces for '{name}' (label={label_id})")
         label_id += 1
 
     return u8_list, norm_list, np.array(labels), names, name_map
@@ -100,7 +102,7 @@ def main():
     os.makedirs("saved_models", exist_ok=True)
 
     # 1. Olivetti Baseline
-    print("[Bonus3-Face] Loading Olivetti dataset...")
+    print("[02-Face] Loading Olivetti faces dataset...")
     raw = fetch_olivetti_faces()
     ol_u8 = []
     ol_norm = []
@@ -111,20 +113,20 @@ def main():
     ol_labels = raw.target
 
     # 2. Team Faces
-    print("[Bonus3-Face] Loading team faces with quality filter...")
+    print("[02-Face] Loading team faces...")
     team_u8, team_norm, team_labels, team_names, name_map = load_team_faces()
 
     all_u8 = np.array(ol_u8 + team_u8)
     all_norm = np.array(ol_norm + team_norm)
     all_labels = np.concatenate([ol_labels, team_labels])
 
-    print(f"[Bonus3-Face] Total samples: {len(all_labels)} (Olivetti={len(ol_labels)}, Team={len(team_labels)})")
+    print(f"[02-Face] Total samples: {len(all_labels)} (Olivetti={len(ol_labels)}, Team={len(team_labels)})")
 
     # 3. PCA Feature Extractor
     extractor = FaceFeatureExtractor(n_pca_components=40)
     extractor.fit(all_norm[all_labels < 28])
     all_features = np.array([extractor.extract(u, n) for u, n in zip(all_u8, all_norm)])
-    print(f"[Bonus3-Face] Feature dim: {all_features.shape[1]}")
+    print(f"[02-Face] Feature dimensionality: {all_features.shape[1]}")
 
     # 4. Splits & Trials
     train_ids = np.concatenate([np.arange(0, 28), np.unique(team_labels)])
@@ -139,7 +141,7 @@ def main():
         all_features, all_labels, enrolled_ids=test_known, impostor_ids=test_impostors
     )
 
-    print(f"[Bonus3-Face] Train pairs: {len(X_train)}, Test pairs: {len(X_test)}")
+    print(f"[02-Face] Train pairs: {len(X_train)}, Test pairs: {len(X_test)}")
 
     # 5. Model: SVM (RBF) with StandardScaler
     model = Pipeline([
@@ -147,7 +149,7 @@ def main():
         ("clf", SVC(kernel="rbf", C=5.0, probability=True, random_state=42))
     ])
 
-    print("\n--- Training SVM (RBF) with Scaler ---")
+    print("\n--- Training SVM (RBF) with StandardScaler ---")
     model.fit(X_train, y_train)
 
     test_probs = model.predict_proba(X_test)[:, 1]
@@ -157,7 +159,7 @@ def main():
     print(f"  Accuracy:  {metrics['accuracy']:.4f}")
     print(f"  FAR:       {metrics['far']:.4f}")
     print(f"  FRR:       {metrics['frr']:.4f}")
-    print(f"  EER:       {eer:.4f} (at threshold {opt_thresh:.4f})")
+    print(f"  EER:       {eer:.4f} (optimal threshold={opt_thresh:.4f})")
     print(f"  AUC:       {metrics['auc']:.4f}")
 
     # Full templates for all enrolled subjects
@@ -175,10 +177,9 @@ def main():
         "label_to_name": name_map
     }
 
-    save_path = os.path.join("saved_models", "face_verifier_team.pkl")
-    joblib.dump(bundle, save_path)
-    print(f"\n[Bonus3-Face] Saved best face verifier (EER={eer:.4f}) to {save_path}")
-    print(f"[Bonus3-Face] Enrolled subjects: {name_map}")
+    joblib.dump(bundle, "saved_models/face_verifier_team.pkl")
+    joblib.dump(bundle, "saved_models/face_verifier.pkl")
+    print(f"\n[02-Face] Saved models to saved_models/face_verifier_team.pkl and face_verifier.pkl")
 
 
 if __name__ == "__main__":

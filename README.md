@@ -1,51 +1,77 @@
-# Hierarchical Multimodal Biometric Verification System
+# Hierarchical Multimodal Biometric Verification & Access Control System
 
-A multimodal biometric verification system built with traditional Machine Learning techniques (SVM, Random Forest) using face images, voice recordings, and fingerprints.
+An end-to-end multimodal biometric verification system employing traditional Machine Learning (SVM, Random Forest) with Face, Voice, and Fingerprint modalities, coupled with a hierarchical decision engine and isolated speech command recognition for Role-Based Access Control (RBAC).
 
-## Project Structure
-- `face_features.py`: Face preprocessing (Haar cascade face crop, grayscale, resize $64\times 64$, normalization) and feature extraction (HOG, LBP, PCA/eigenfaces).
-- `voice_features.py`: Audio feature extraction (MFCC, Zero-Crossing Rate, RMS Energy) and multi-speaker chimeric dataset handling.
-- `fingerprint_features.py`: Fingerprint preprocessing (grayscale, resize $96\times 96$, CLAHE ridge enhancement, normalization) and feature extraction (Gabor bank, HOG, LBP).
-- `metrics.py`: Shared biometric evaluation metrics (FAR, FRR, EER, Accuracy, AUC, Precision, Recall, F1, DET curve, Confusion Matrix).
-- `speech_commands.py`: Task 4 isolated-word command recognition (MFCC + SVM) and Role-Based Access Control (RBAC) executor.
-- `hierarchical_pipeline.py`: Task 6 hierarchical pipeline (Stage 1 Face -> Stage 2 Fusion -> Stage 3 Fingerprint) with validation threshold tuning.
-- `task1_face_verification.py`: Task 1 face-only verification pipeline (SVM & Random Forest) with saved model export.
-- `task2_fingerprint_verification.py`: Task 2 fingerprint verification pipeline (SOCOFing, Gabor + HOG + LBP, SVM & RF).
-- `realtime_face_verification.py`: Bonus 2 live webcam face verification interface.
-- `task5_multimodal_verification.py`: Task 5 early-fusion multimodal verification with three-way performance comparison.
-- `task6_hierarchical_pipeline.py`: Task 6 complete hierarchical verification benchmark, threshold tuning, and multi-architecture evaluation.
-- `app.py`: Task 6 end-to-end live interactive Streamlit demo app (live webcam, voice command execution, pipeline inspection, and analytics).
-- `fingerprint/`: Standalone modular fingerprint package with Kaggle API automatic fetcher, verification API, and unit tests.
+---
 
-## Getting Started
+## Numbered Execution Pipeline
 
-### Requirements
-```bash
-pip install numpy scikit-learn scikit-image opencv-python librosa joblib matplotlib kaggle
-```
+To reproduce, train, benchmark, or run the verification system, execute the numbered scripts in sequential order:
 
-### Running the Modules
-1. **Task 1: Face Verification**
+| Step | Script | Description |
+|:---:|:---|:---|
+| **01** | `01_preprocess_and_crop_faces.py` | Detects and crops raw face photos into centered, square crops using deep MTCNN face detection. |
+| **02** | `02_train_face_verification.py` | Extracts HOG, LBP, and PCA/Eigenface features ($D=1618$) from Olivetti and enrolled team faces, trains RBF SVM verifier, and exports templates. |
+| **03** | `03_train_fingerprint_verification.py` | Enhances ridge flow with CLAHE and extracts Gabor, HOG, and LBP features ($D=4406$) to train fingerprint verifier. |
+| **04** | `04_train_multimodal_fusion.py` | Generates early feature fusion pairs (Face + Voice MFCC) for enrolled subjects, fits SVM fusion verifier, and saves templates. |
+| **05** | `05_tune_and_benchmark_pipeline.py` | Tunes Stage 1 thresholds ($\theta_{low}$, $\theta_{high}$) on validation data, benchmarks 5 biometric architectures, and plots ROC & DET curves. |
+| **06** | `06_train_speech_commands.py` | Trains dual-engine speech command recognizer (Google Speech Recognition + MFCC/SVM fallback) across 8 system commands. |
+| **07** | `07_realtime_webcam_stream.py` | Runs standalone OpenCV desktop camera stream with real-time face detection, 5-second stable hold, and live Stage 1 score display. |
+| **08** | `08_launch_streamlit_app.py` | Launches the interactive multi-page Streamlit web dashboard (`streamlit run app.py`). |
+
+---
+
+## Supporting Library Modules
+
+- [`face_features.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/face_features.py): Preprocessing (grayscale, CLAHE, resizing to $64\times 64$, normalization) and feature extraction (HOG, Uniform LBP, PCA Eigenfaces).
+- [`voice_features.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/voice_features.py): Preprocessing (pre-emphasis, trimming) and feature extraction (13 MFCCs + deltas, Zero-Crossing Rate, RMS energy).
+- [`fingerprint_features.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/fingerprint_features.py): Ridge enhancement with CLAHE and feature extraction (Gabor filter bank at 8 orientations, HOG, LBP).
+- [`hierarchical_pipeline.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/hierarchical_pipeline.py): Core hierarchical verification decision engine:
+  - **Stage 1 (Face)**: Fast path. Score $\ge \theta_{high}$ $\rightarrow$ Accept. Score $< \theta_{low}$ $\rightarrow$ Reject.
+  - **Stage 2 (Face + Voice Fusion)**: Triggered when $\theta_{low} \le \text{Score} < \theta_{high}$. Score $\ge \theta_{fusion}$ $\rightarrow$ Accept.
+  - **Stage 3 (Fingerprint)**: Optional fallback or high-security escalation.
+- [`speech_commands.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/speech_commands.py): Speech command recognition with Role-Based Access Control (Admin, Operator, User, Guest).
+- [`metrics.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/metrics.py): Shared evaluation metrics (FAR, FRR, EER, ROC AUC, DET curves).
+- [`app.py`](file:///c:/Users/Administrator/Desktop/Task%202%20supervised%20learning/app.py): The full interactive Streamlit web dashboard.
+
+---
+
+## Installation & Setup
+
+1. Install required dependencies:
    ```bash
-   python task1_face_verification.py
+   pip install -r requirements.txt
    ```
-2. **Task 2: Fingerprint Verification**
+
+2. Run the pipeline from start to finish:
    ```bash
-   python task2_fingerprint_verification.py
+   python 01_preprocess_and_crop_faces.py
+   python 02_train_face_verification.py
+   python 03_train_fingerprint_verification.py
+   python 04_train_multimodal_fusion.py
+   python 05_tune_and_benchmark_pipeline.py
+   python 06_train_speech_commands.py
    ```
-3. **Bonus 2: Real-Time Webcam Face Verification**
+
+3. Launch the web dashboard:
    ```bash
-   python realtime_face_verification.py
+   python 08_launch_streamlit_app.py
    ```
-4. **Task 5: Multimodal Early Fusion & 3-Way Comparison**
-   ```bash
-   python task5_multimodal_verification.py
-   ```
-5. **Task 6: Hierarchical Pipeline Benchmark & Architecture Comparison**
-   ```bash
-   python task6_hierarchical_pipeline.py
-   ```
-6. **Task 6: Live Interactive Streamlit Demo App**
-   ```bash
-   streamlit run app.py
-   ```
+   *(or `streamlit run app.py`)*
+
+---
+
+## Diagnostic Findings: Face Cropping & Webcam Verification
+
+### Why Old Uploaded Photos Failed
+1. **Haar Cascade Failure on High-Resolution / Angled Photos**:
+   - The standard OpenCV Haar cascade failed on portrait phone photos ($959\times 1280$) when taken with eyeglasses, tilted heads, or natural indoor lighting. It frequently detected shirt collars, towels, or chest areas as faces (`y=719`), saving non-face crops into the template.
+   - On photos where it did find the face, the bounding box was overly broad ($700\times 700$), including background and neck.
+2. **Landmark Alignment Mismatch with Live Webcam**:
+   - The live webcam captured a tight, upright face crop ($140\times 140$ to $240\times 240$).
+   - When resized to $64\times 64$, eyes, nose, and mouth fell into completely different spatial cells compared to the broad/corrupted crops in the template. This caused the difference vector $|x - \text{template}|$ to look like an impostor, resulting in low scores (~$20\%$).
+
+### How It Was Resolved
+- **MTCNN Face Cropping (`01_preprocess_and_crop_faces.py`)**: All 13 photos for Ahmed and 7 for Mohamed were re-cropped using MTCNN deep face detection with square margins and landmark centering.
+- **Laptop Camera Photos**: Adding direct webcam captures (`10.jpg`, `11.jpg`, `12.jpg`) eliminated the camera sensor domain gap.
+- **RBF SVM + Dual Cascade Detection**: The face verifier achieves 98.0% accuracy, 3.15% EER, and scores 72%–100% on live webcam frames.

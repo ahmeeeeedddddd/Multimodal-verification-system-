@@ -405,11 +405,11 @@ with tab3:
         if os.path.exists(roc_img_path):
             st.image(roc_img_path, caption="Receiver Operating Characteristic (ROC) Comparison", width="stretch")
         else:
-            st.warning("Run python task6_hierarchical_pipeline.py to generate ROC plot.")
+            st.warning("Run `python 05_tune_and_benchmark_pipeline.py` to generate ROC plot.")
 
     with col_det:
         det_img_path = "saved_models/det_comparison.png"
         if os.path.exists(det_img_path):
             st.image(det_img_path, caption="Detection Error Tradeoff (DET) Probit Scale Comparison", width="stretch")
         else:
-            st.warning("Run python task6_hierarchical_pipeline.py to generate DET plot.")
+            st.warning("Run `python 05_tune_and_benchmark_pipeline.py` to generate DET plot.")

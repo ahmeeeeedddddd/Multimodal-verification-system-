@@ -1,8 +1,8 @@
-"""Cleanly crop team member faces using deep MTCNN face detection.
+"""01 — Preprocess and Crop Team Faces.
 
-Backs up original raw images to data/team_faces_raw/ and replaces
-data/team_faces/<name>/*.jpeg with tight, centered, squared face crops.
-This resolves the issue where Haar cascade detected shirts, collars, or arms.
+Uses MTCNN deep cascaded networks to detect and crop face squares
+from raw photos in data/team_faces/<person>/*.jpg.
+Backs up raw photos to data/team_faces_raw/ to preserve originals.
 """
 
 import os
@@ -34,9 +34,8 @@ for person in ["ahmed", "mohamed"]:
         glob.glob(os.path.join(person_dir, "*.png"))
     )
 
-    print(f"\nProcessing {person} ({len(files)} images)...")
+    print(f"\n[01-Crop] Processing {person} ({len(files)} images)...")
     for f in files:
-        # Backup original raw image if not already backed up
         backup_path = os.path.join(raw_person_dir, os.path.basename(f))
         if not os.path.exists(backup_path):
             shutil.copy2(f, backup_path)
@@ -65,8 +64,8 @@ for person in ["ahmed", "mohamed"]:
 
             crop = img_bgr[y1:y2, x1:x2]
             cv2.imwrite(f, crop)
-            print(f"  [MTCNN Crop] {os.path.basename(f)}: original {w}x{h} -> clean face crop ({crop.shape[1]}x{crop.shape[0]})")
+            print(f"  [MTCNN] {os.path.basename(f)}: {w}x{h} -> clean face crop ({crop.shape[1]}x{crop.shape[0]})")
         else:
             print(f"  [Warning] No face detected by MTCNN in {f}, keeping original.")
 
-print("\nAll team faces cleanly cropped and saved.")
+print("\n[01-Crop] Completed successfully.")

@@ -1,9 +1,12 @@
-"""Retrain multimodal fusion verifier including team members (Ahmed & Mohamed).
+"""04 — Train Stage 2 Multimodal Fusion Verifier.
 
+Early-fusion (Face + Voice) model combining HOG+LBP+PCA face features
+with MFCC+ZCR+RMS voice features into a unified multimodal vector.
 Enrolls:
-- Baseline test users: 28, 29, 30, 31, 32, 33, 34
+- Benchmark subjects: 28 through 34
 - Team members: 1000 (Ahmed), 1001 (Mohamed)
-Saves to saved_models/fusion_verifier.pkl
+Saves:
+- saved_models/fusion_verifier.pkl
 """
 
 import os
@@ -24,7 +27,7 @@ from metrics import compute_metrics, compute_eer
 def main():
     np.random.seed(42)
     os.makedirs("saved_models", exist_ok=True)
-    print("[Fusion-Team] Extracting Face and Voice Features...")
+    print("[04-Fusion] Extracting Face and Voice Features...")
 
     # 1. Olivetti Face Features
     raw_faces = fetch_olivetti_faces()
@@ -98,16 +101,13 @@ def main():
     scaler_voice = StandardScaler().fit(all_train_voice)
 
     # Multimodal representations
-    # Olivetti
     ol_fused = np.hstack([
         scaler_face.transform(ol_face_feats),
         scaler_voice.transform(ol_voice_feats)
     ])
 
-    # Team
     team_fused = {}
     for uid in [1000, 1001]:
-        # Pair each face with corresponding mean voice or voice samples
         n_faces = len(team_face_feats[uid])
         v_subset = team_voice_feats[uid][:n_faces] if len(team_voice_feats[uid]) >= n_faces else team_voice_feats[uid]
         f_norm = scaler_face.transform(team_face_feats[uid][:len(v_subset)])
@@ -116,14 +116,11 @@ def main():
 
     # 4. Multimodal Templates
     templates = {}
-    # Baseline test identities (28-34)
     for uid in range(28, 35):
         idxs = np.where(raw_faces.target == uid)[0][:5]
         templates[uid] = np.mean(ol_fused[idxs], axis=0)
 
-    # Team members (1000, 1001)
     for uid in [1000, 1001]:
-        # Clean multimodal template
         face_tmpl_norm = scaler_face.transform(np.mean(team_face_feats[uid], axis=0, keepdims=True))
         voice_tmpl_norm = scaler_voice.transform(np.mean(team_voice_feats[uid], axis=0, keepdims=True))
         templates[uid] = np.hstack([face_tmpl_norm, voice_tmpl_norm])[0]
@@ -142,13 +139,11 @@ def main():
             X_train.append(np.abs(ol_fused[idx] - t))
             y_train.append(0)
 
-    # Add team member trials to training
     for uid in [1000, 1001]:
         t = templates[uid]
         for row in team_fused[uid]:
             X_train.append(np.abs(row - t))
             y_train.append(1)
-        # Impostor trials (cross-team and cross-Olivetti)
         other_uid = 1001 if uid == 1000 else 1000
         for row in team_fused[other_uid]:
             X_train.append(np.abs(row - t))
@@ -161,23 +156,20 @@ def main():
     X_train = np.array(X_train)
     y_train = np.array(y_train)
 
-    print(f"[Fusion-Team] Total training pairs: {len(X_train)} (Positive: {(y_train == 1).sum()}, Negative: {(y_train == 0).sum()})")
+    print(f"[04-Fusion] Total training pairs: {len(X_train)} (Positive: {(y_train == 1).sum()}, Negative: {(y_train == 0).sum()})")
 
-    # Fit SVM RBF Fusion Classifier
     clf_fusion = SVC(kernel="rbf", C=5.0, probability=True, random_state=42)
     clf_fusion.fit(X_train, y_train)
 
-    # Quick test on team members
     for uid, name in [(1000, "Ahmed"), (1001, "Mohamed")]:
         diff_gen = np.abs(team_fused[uid] - templates[uid])
         probs_gen = clf_fusion.predict_proba(diff_gen)[:, 1]
-        print(f"  [Verify] {name} (User {uid}) genuine fusion scores: min={probs_gen.min():.3f}, mean={probs_gen.mean():.3f}, max={probs_gen.max():.3f}")
+        print(f"  [04-Fusion] {name} genuine fusion scores: min={probs_gen.min():.3f}, mean={probs_gen.mean():.3f}, max={probs_gen.max():.3f}")
 
-        # Impostor
         other_uid = 1001 if uid == 1000 else 1000
         diff_imp = np.abs(team_fused[other_uid] - templates[uid])
         probs_imp = clf_fusion.predict_proba(diff_imp)[:, 1]
-        print(f"  [Verify] Impostor claiming {name} fusion scores: min={probs_imp.min():.3f}, mean={probs_imp.mean():.3f}, max={probs_imp.max():.3f}")
+        print(f"  [04-Fusion] Impostor claiming {name} fusion scores: min={probs_imp.min():.3f}, mean={probs_imp.mean():.3f}, max={probs_imp.max():.3f}")
 
     fusion_bundle = {
         "model": clf_fusion,
@@ -190,7 +182,7 @@ def main():
     }
 
     joblib.dump(fusion_bundle, "saved_models/fusion_verifier.pkl")
-    print(f"[Fusion-Team] Successfully saved fusion_verifier.pkl with templates for IDs: {list(templates.keys())}")
+    print(f"[04-Fusion] Successfully saved saved_models/fusion_verifier.pkl")
 
 
 if __name__ == "__main__":
