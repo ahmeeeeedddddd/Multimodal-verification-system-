@@ -27,7 +27,7 @@ WORD_TO_COMMAND = {
 USER_ROLES = {
     "basmala": "admin",
      "mohamed": "user",
-    # "ahmed": "user",
+     "ahmed": "user",
 }
 
 
