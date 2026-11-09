@@ -114,6 +114,25 @@ class HierarchicalVerifier:
         prob = self.fusion_bundle["model"].predict_proba(diff)[0, 1]
         return float(prob)
 
+    def compute_voice_score(self, voice_feat, claimed_id):
+        """Compute genuine probability for voice-only verification."""
+        if self.fusion_bundle is None or claimed_id not in self.fusion_bundle["templates"]:
+            return 0.0
+
+        if hasattr(voice_feat, "ndim") and voice_feat.ndim == 1 and len(voice_feat) > 100:
+            voice_feat = extract_voice_features(voice_feat)
+        else:
+            voice_feat = np.asarray(voice_feat).ravel()
+
+        scaler_voice = self.fusion_bundle["scaler_voice"]
+        voice_norm = scaler_voice.transform(voice_feat.reshape(1, -1))
+        tmpl = np.asarray(self.fusion_bundle["templates"][claimed_id]).ravel()
+        voice_tmpl = tmpl[1618:]
+        diff = np.abs(voice_norm.ravel() - voice_tmpl)
+        dist = np.mean(diff)
+        prob = float(np.exp(-dist / 1.5))
+        return float(np.clip(prob, 0.0, 1.0))
+
     def compute_fingerprint_score(self, fingerprint_feat, claimed_id):
         """Compute genuine probability for fingerprint."""
         if self.fingerprint_bundle is None or claimed_id not in self.fingerprint_bundle["templates"]:

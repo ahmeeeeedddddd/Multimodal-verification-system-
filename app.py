@@ -112,7 +112,7 @@ verification_mode = st.sidebar.selectbox(
 st.sidebar.subheader("⚙️ Verification Thresholds")
 theta_low = st.sidebar.slider("θ_low (Stage 1 Reject)", 0.05, 0.45, float(verifier.theta_low), 0.01)
 theta_high = st.sidebar.slider("θ_high (Stage 1 Accept / Face Only)", 0.50, 0.95, float(verifier.theta_high), 0.01)
-theta_fusion = st.sidebar.slider("θ_fusion (Stage 2 Fusion / Voice Only)", 0.30, 0.70, float(verifier.theta_fusion), 0.01)
+theta_fusion = st.sidebar.slider("θ_fusion (Stage 2 Fusion / Voice Only)", 0.30, 0.85, min(0.60, float(verifier.theta_fusion)), 0.01)
 enable_fingerprint = st.sidebar.checkbox("Enable Stage 3 Fingerprint Verification", value=False)
 
 verifier.theta_low = theta_low
@@ -344,16 +344,7 @@ with tab1:
                             "reason": f"Face-Only Mode: Score {face_s*100:.1f}% {' >= ' if acc else ' < '} threshold {theta_high*100:.1f}%"
                         }
                     elif verification_mode == "Voice-Only Verification":
-                        from voice_features import extract_voice_features
-                        v_feat = extract_voice_features(query_audio, sr=query_sr)
-                        if verifier.fusion_bundle and target_id in verifier.fusion_bundle["templates"]:
-                            s_v = verifier.fusion_bundle["scaler_voice"]
-                            v_norm = s_v.transform(v_feat.reshape(1, -1))
-                            v_tmpl = verifier.fusion_bundle["templates"][target_id][0, 1618:]
-                            dist = float(np.linalg.norm(v_norm - v_tmpl))
-                            v_score = float(np.exp(-dist / 8.0))
-                        else:
-                            v_score = 0.50
+                        v_score = verifier.compute_voice_score(query_audio, target_id)
                         acc = v_score >= theta_fusion
                         result = {
                             "verified": bool(acc),

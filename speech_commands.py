@@ -50,16 +50,40 @@ USER_ROLES = {
 }
 
 
+def preprocess_command_audio(y, sr=16000):
+    if hasattr(y, "ndim") and y.ndim > 1:
+        y = y.mean(axis=1)
+    y = np.asarray(y, dtype=np.float32)
+    if sr != 16000 and len(y) > 0:
+        y = librosa.resample(y, orig_sr=sr, target_sr=16000)
+        sr = 16000
+    if len(y) > 0:
+        trimmed, _ = librosa.effects.trim(y, top_db=18)
+        if len(trimmed) >= 2000:
+            y = trimmed
+    y = y - np.mean(y)
+    m = np.max(np.abs(y))
+    if m > 1e-6:
+        y = y / m
+    if len(y) < 4000:
+        y = np.pad(y, (0, 4000 - len(y)))
+    return y, sr
+
+
 def extract_command_features(y, sr=16000, n_mfcc=13):
-    """Extract MFCC statistics for speech command recognition."""
-    if len(y) < sr // 4:
-        y = np.pad(y, (0, sr // 4 - len(y)))
+    """Extract MFCC + delta + ZCR + RMS statistics for speech command recognition."""
+    y, sr = preprocess_command_audio(y, sr)
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
+    delta = librosa.feature.delta(mfcc)
+    zcr = librosa.feature.zero_crossing_rate(y=y)
+    rms = librosa.feature.rms(y=y)
+
     mfcc_mean = np.mean(mfcc, axis=1)
     mfcc_std = np.std(mfcc, axis=1)
-    zcr = np.mean(librosa.feature.zero_crossing_rate(y=y))
-    rms = np.mean(librosa.feature.rms(y=y))
-    return np.hstack([mfcc_mean, mfcc_std, [zcr, rms]])
+    delta_mean = np.mean(delta, axis=1)
+    zcr_mean = float(np.mean(zcr))
+    rms_mean = float(np.mean(rms))
+    return np.hstack([mfcc_mean, mfcc_std, delta_mean, [zcr_mean, rms_mean]])
 
 
 def generate_synthetic_command_data(n_samples_per_word=25, sr=16000, duration=1.0, seed=42):
