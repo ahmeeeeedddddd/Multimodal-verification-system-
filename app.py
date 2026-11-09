@@ -266,6 +266,14 @@ with tab1:
                     if hasattr(query_audio, "ndim") and query_audio.ndim > 1:
                         query_audio = query_audio.mean(axis=1)
                     audio_recorded = True
+                mic_override = st.selectbox(
+                    "Command Word Spoken (Auto-Detect or Select):",
+                    ["-- Auto-Detect via MFCC-SVM --"] + COMMAND_WORDS,
+                    index=0,
+                    key="mic_cmd_select"
+                )
+                if mic_override != "-- Auto-Detect via MFCC-SVM --":
+                    spoken_command = mic_override
 
             with voice_tab_upload:
                 uploaded_audio = st.file_uploader("Upload Voice Recording (.wav)", type=["wav"], key="uploader_wav")
