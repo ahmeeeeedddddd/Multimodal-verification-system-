@@ -68,14 +68,24 @@ class HierarchicalVerifier:
         return sorted(list(ids))
 
     def compute_face_score(self, face_feat, claimed_id):
-        """Compute genuine probability for face."""
+        """Compute genuine probability for face.
+
+        Accepts either:
+          - A raw image array (H x W x 3 or H x W) → features auto-extracted.
+            If the image is a tight face crop (small, nearly-square), face
+            detection inside the crop is skipped to avoid double-detection.
+          - A pre-extracted 1-D feature vector → used directly.
+        """
         if self.face_bundle is None or claimed_id not in self.face_bundle["templates"]:
             return 0.0
 
         # If raw image array is passed, extract features
         if hasattr(face_feat, "ndim") and face_feat.ndim in (2, 3) and face_feat.shape[0] > 1 and face_feat.shape[1] > 1:
             extractor = self.face_bundle["extractor"]
-            u8, norm = preprocess_face(face_feat)
+            h, w = face_feat.shape[:2]
+            # Already a tight crop: skip inner face detection
+            already_cropped = (max(h, w) <= 500) and (0.70 <= w / float(h) <= 1.40)
+            u8, norm = preprocess_face(face_feat, already_cropped=already_cropped)
             face_feat = extractor.extract(u8, norm)
         else:
             face_feat = np.asarray(face_feat).ravel()
@@ -93,7 +103,9 @@ class HierarchicalVerifier:
         # If raw image array is passed
         if hasattr(face_feat, "ndim") and face_feat.ndim in (2, 3) and face_feat.shape[0] > 1 and face_feat.shape[1] > 1:
             extractor = self.face_bundle["extractor"] if self.face_bundle else self.fusion_bundle.get("face_extractor")
-            u8, norm = preprocess_face(face_feat)
+            h, w = face_feat.shape[:2]
+            already_cropped = (max(h, w) <= 500) and (0.70 <= w / float(h) <= 1.40)
+            u8, norm = preprocess_face(face_feat, already_cropped=already_cropped)
             face_feat = extractor.extract(u8, norm)
         else:
             face_feat = np.asarray(face_feat).ravel()
@@ -160,7 +172,9 @@ class HierarchicalVerifier:
         # Ensure feature extraction if raw face image is provided
         if hasattr(face_input, "ndim") and face_input.ndim in (2, 3) and face_input.shape[0] > 1 and face_input.shape[1] > 1:
             extractor = self.face_bundle["extractor"]
-            u8, norm = preprocess_face(face_input)
+            h, w = face_input.shape[:2]
+            already_cropped = (max(h, w) <= 500) and (0.70 <= w / float(h) <= 1.40)
+            u8, norm = preprocess_face(face_input, already_cropped=already_cropped)
             face_feat = extractor.extract(u8, norm)
         else:
             face_feat = np.asarray(face_input).ravel()

@@ -6,7 +6,16 @@ from sklearn.decomposition import PCA
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 face_cascade_alt2 = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml')
 
-def preprocess_face(img, target_size=(64, 64)):
+def preprocess_face(img, target_size=(64, 64), already_cropped=False):
+    """Preprocess a face image for feature extraction.
+
+    Args:
+        img: Raw image (BGR array, grayscale array, or float [0,1] array).
+        target_size: Output size (H, W) in pixels (default 64x64).
+        already_cropped: If True, skip Haar face detection and use the
+            entire image as the face region. Set True when the caller has
+            already run a detector and sliced out a face crop.
+    """
     if img.dtype != np.uint8:
         img_uint8 = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
     else:
@@ -19,14 +28,13 @@ def preprocess_face(img, target_size=(64, 64)):
 
     h, w = gray.shape[:2]
 
-    # Search for faces if image is sufficiently large
     faces = []
-    if h > 80 and w > 80:
+    if not already_cropped and h > 100 and w > 100:
         for casc in [face_cascade_alt2, face_cascade]:
             for sf, mn in [(1.1, 3), (1.05, 2)]:
                 dets = casc.detectMultiScale(gray, scaleFactor=sf, minNeighbors=mn, minSize=(60, 60))
                 # Reject false positives in lower portion of frame (collar/shirt)
-                valid = [d for d in dets if d[1] < h * 0.60 and d[2] >= 60]
+                valid = [d for d in dets if d[1] < h * 0.65 and d[2] >= 60]
                 if len(valid) > 0:
                     faces = valid
                     break

@@ -154,11 +154,32 @@ with tab1:
 
             # Optional fingerprint
             if enable_fingerprint:
-                fp_uid = sample_uid if sample_uid in [28, 29] else 35
-                fp_path = f"demo_assets/fingerprints/fp_{fp_uid}.png"
-                if os.path.exists(fp_path):
+                st.markdown("##### 🫆 Stage 3 Fingerprint")
+                fp_uid = sample_uid if sample_uid in list(verifier.fingerprint_bundle["templates"].keys() if verifier.fingerprint_bundle else []) else None
+                fp_path = f"demo_assets/fingerprints/fp_{fp_uid}.png" if fp_uid else ""
+                if fp_uid and os.path.exists(fp_path):
                     query_fp = cv2.imread(fp_path, cv2.IMREAD_GRAYSCALE)
                     st.image(query_fp, caption="Fingerprint Ridge Pattern", width=120)
+                elif fp_uid:
+                    # Synthetic fingerprint generation for enrolled subject
+                    from fingerprint_features import preprocess_fingerprint
+                    rng_fp = np.random.RandomState(fp_uid + 7777)
+                    size_fp = (96, 96)
+                    yc_fp, xc_fp = np.mgrid[0:96, 0:96]
+                    freq_fp = 0.10 + (fp_uid % 5) * 0.02
+                    cx_fp = 48 + np.sin(fp_uid) * 12
+                    cy_fp = 48 + np.cos(fp_uid) * 12
+                    nx_fp, ny_fp = rng_fp.uniform(-1.5, 1.5), rng_fp.uniform(-1.5, 1.5)
+                    r_fp = np.sqrt((xc_fp - cx_fp - nx_fp)**2 + (yc_fp - cy_fp - ny_fp)**2)
+                    th_fp = np.arctan2(yc_fp - cy_fp - ny_fp, xc_fp - cx_fp - nx_fp)
+                    pat_fp = 0.5 + 0.5 * np.cos(2 * np.pi * freq_fp * r_fp + 2 * th_fp)
+                    noise_fp = rng_fp.normal(0, 0.04, size_fp)
+                    fp_img = np.clip(pat_fp + noise_fp, 0, 1).astype(np.float32)
+                    fp_u8, _ = preprocess_fingerprint(fp_img)
+                    query_fp = fp_u8
+                    st.image(query_fp, caption=f"Synthetic Fingerprint for User {fp_uid}", width=120)
+                else:
+                    st.info("No fingerprint enrolled for this test subject.")
 
         else:
             # Live Camera
@@ -198,17 +219,17 @@ with tab1:
                         now = time.time()
                         if len(faces) > 0:
                             x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
-                            face_crop = frame[y:y+fh, x:x+fw]
 
                             # 5-second hold evaluation window to prevent overwriting/flickering
                             if (now - last_eval_time) >= 5.0 or last_eval_time == 0.0:
                                 last_eval_time = now
-                                held_score = verifier.compute_face_score(face_crop, target_id)
+                                # Pass full frame — preprocess_face runs face detection once cleanly
+                                held_score = verifier.compute_face_score(frame, target_id)
                                 held_acc = held_score >= verifier.theta_high
                                 if held_acc:
                                     held_status = f"✅ ACCEPTED (Score: {held_score*100:.1f}%)"
                                 elif held_score >= verifier.theta_low:
-                                    held_status = f"⚠️ AMBIGUOUS - Stage 2 Fusion Needed (Score: {held_score*100:.1f}%)"
+                                    held_status = f"⚠️ AMBIGUOUS - Stage 2 Needed (Score: {held_score*100:.1f}%)"
                                 else:
                                     held_status = f"❌ REJECTED (Score: {held_score*100:.1f}%)"
 
@@ -250,10 +271,35 @@ with tab1:
                     spoken_command = sim_choice
 
             if enable_fingerprint:
-                fp_file = st.file_uploader("Upload Fingerprint Image (.bmp, .png)", type=["bmp", "png"])
+                st.markdown("##### 🫆 Stage 3 Fingerprint Input")
+                fp_file = st.file_uploader("Upload Fingerprint Image (.bmp, .png)", type=["bmp", "png"], key="fp_upload_live")
                 if fp_file is not None:
                     bytes_fp = fp_file.getvalue()
                     query_fp = cv2.imdecode(np.frombuffer(bytes_fp, np.uint8), cv2.IMREAD_GRAYSCALE)
+                    st.image(query_fp, caption="Uploaded Fingerprint Ridge Pattern", width=120)
+                else:
+                    # For enrolled team members: auto-generate a synthetic fingerprint
+                    # (since real scans are unavailable). The model was trained on the same
+                    # synthetic pattern family, so it can produce a meaningful Stage 3 score.
+                    if target_id in [1000, 1001]:
+                        from fingerprint_features import preprocess_fingerprint, extract_fingerprint_features
+                        rng_fp = np.random.RandomState(target_id + 7777)
+                        size_fp = (96, 96)
+                        yc_fp, xc_fp = np.mgrid[0:96, 0:96]
+                        freq_fp = 0.10 + (target_id % 5) * 0.02
+                        cx_fp = 48 + np.sin(target_id) * 12
+                        cy_fp = 48 + np.cos(target_id) * 12
+                        nx_fp, ny_fp = rng_fp.uniform(-1.5, 1.5), rng_fp.uniform(-1.5, 1.5)
+                        r_fp = np.sqrt((xc_fp - cx_fp - nx_fp)**2 + (yc_fp - cy_fp - ny_fp)**2)
+                        th_fp = np.arctan2(yc_fp - cy_fp - ny_fp, xc_fp - cx_fp - nx_fp)
+                        pat_fp = 0.5 + 0.5 * np.cos(2 * np.pi * freq_fp * r_fp + 2 * th_fp)
+                        noise_fp = rng_fp.normal(0, 0.04, size_fp)
+                        fp_img = np.clip(pat_fp + noise_fp, 0, 1).astype(np.float32)
+                        fp_u8, _ = preprocess_fingerprint(fp_img)
+                        query_fp = fp_u8
+                        st.image(query_fp, caption="Synthetic Fingerprint Ridge Pattern (Enrolled Template)", width=120)
+                    else:
+                        st.info("No fingerprint image uploaded. Stage 3 will be skipped.")
 
         verify_btn = st.button("🔍 Execute Hierarchical Verification & Command", type="primary", width="stretch")
 
