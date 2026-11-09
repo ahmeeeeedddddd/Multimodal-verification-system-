@@ -9,4 +9,7 @@ __pycache__/
 # Large datasets: each member downloads these himself
 data/speech_commands/
 
-# Everything else under data/ (FSDD, team_voice, live_test, faces) is tracked
+# Scratch & test temp files
+scratch/
+data/team_faces_raw/
+*.log

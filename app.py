@@ -17,6 +17,7 @@ import soundfile as sf
 import matplotlib.pyplot as plt
 
 from hierarchical_pipeline import HierarchicalVerifier
+from face_features import face_cascade, face_cascade_alt2
 from speech_commands import (
     COMMAND_WORDS,
     ROLE_PERMISSIONS,
@@ -50,10 +51,13 @@ def load_system():
         fingerprint_bundle_path="saved_models/fingerprint_verifier.pkl"
     )
     if os.path.exists("saved_models/hierarchical_pipeline_config.pkl"):
-        cfg = joblib.load("saved_models/hierarchical_pipeline_config.pkl")
-        verifier.theta_low = cfg.get("theta_low", 0.15)
-        verifier.theta_high = cfg.get("theta_high", 0.68)
-        verifier.theta_fusion = cfg.get("theta_fusion", 0.50)
+        try:
+            cfg = joblib.load("saved_models/hierarchical_pipeline_config.pkl")
+            verifier.theta_low = cfg.get("theta_low", 0.15)
+            verifier.theta_high = cfg.get("theta_high", 0.68)
+            verifier.theta_fusion = cfg.get("theta_fusion", 0.50)
+        except Exception:
+            pass
 
     cmd_recognizer = get_trained_recognizer()
     cmd_executor = CommandExecutor(permissions=ROLE_PERMISSIONS, user_roles=USER_ROLES)
@@ -70,10 +74,8 @@ enrolled_ids = verifier.enrolled_identities
 if not enrolled_ids:
     enrolled_ids = [28, 29, 30, 31, 32, 33, 34]
 
-# Add team members if their model is loaded
 _team_label_map = {1000: "1000 (Ahmed)", 1001: "1001 (Mohamed)", 1002: "1002 (Basmala)"}
 _team_ids = [tid for tid in [1000, 1001] if tid not in enrolled_ids]
-_team_options = [_team_label_map[t] for t in _team_ids]
 
 claimed_id = st.sidebar.selectbox(
     "👤 Claimed Identity",
@@ -98,7 +100,7 @@ st.sidebar.markdown(f"**Allowed Commands:** `{', '.join(ROLE_PERMISSIONS.get(rol
 st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Hierarchical Thresholds")
 theta_low = st.sidebar.slider("θ_low (Stage 1 Reject)", 0.05, 0.45, float(verifier.theta_low), 0.01)
-theta_high = st.sidebar.slider("θ_high (Stage 1 Accept)", 0.55, 0.95, float(verifier.theta_high), 0.01)
+theta_high = st.sidebar.slider("θ_high (Stage 1 Accept)", 0.50, 0.95, float(verifier.theta_high), 0.01)
 theta_fusion = st.sidebar.slider("θ_fusion (Stage 2 Fusion)", 0.30, 0.70, float(verifier.theta_fusion), 0.01)
 enable_fingerprint = st.sidebar.checkbox("Enable Stage 3 Fingerprint Verification", value=False)
 
@@ -128,8 +130,10 @@ with tab1:
 
         query_face = None
         query_audio = None
+        query_sr = 16000
         query_fp = None
         spoken_command = None
+        audio_recorded = False
 
         if input_mode == "📁 Preloaded Test Samples":
             sample_user = st.selectbox("Select Test Subject Sample", [f"User {i}" for i in [28, 29, 30, 31]] + ["Impostor User 35"], index=0)
@@ -145,7 +149,7 @@ with tab1:
             spoken_command = st.selectbox("Speech Command Utterance", COMMAND_WORDS, index=0)
             audio_path = f"demo_assets/audio/command_{spoken_command}.wav"
             if os.path.exists(audio_path):
-                query_audio, sr = sf.read(audio_path)
+                query_audio, query_sr = sf.read(audio_path)
                 st.audio(audio_path, format="audio/wav")
 
             # Optional fingerprint
@@ -175,7 +179,6 @@ with tab1:
                 if run_live_stream:
                     import time
                     cap = cv2.VideoCapture(0)
-                    from face_features import face_cascade
                     last_eval_time = 0.0
                     held_score = 0.0
                     held_status = "Waiting for face..."
@@ -188,7 +191,9 @@ with tab1:
                             break
 
                         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                        faces = face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(60, 60))
+                        faces = face_cascade_alt2.detectMultiScale(gray, 1.1, 3, minSize=(60, 60))
+                        if len(faces) == 0:
+                            faces = face_cascade.detectMultiScale(gray, 1.1, 3, minSize=(60, 60))
 
                         now = time.time()
                         if len(faces) > 0:
@@ -225,16 +230,24 @@ with tab1:
             with voice_tab_mic:
                 audio_mic = st.audio_input("Click to record your voice command (e.g. say 'unlock' or 'open'):")
                 if audio_mic is not None:
-                    query_audio, sr = sf.read(audio_mic)
+                    query_audio, query_sr = sf.read(audio_mic)
+                    if hasattr(query_audio, "ndim") and query_audio.ndim > 1:
+                        query_audio = query_audio.mean(axis=1)
+                    audio_recorded = True
 
             with voice_tab_upload:
                 uploaded_audio = st.file_uploader("Upload Voice Recording (.wav)", type=["wav"], key="uploader_wav")
                 if uploaded_audio is not None:
-                    query_audio, sr = sf.read(uploaded_audio)
+                    query_audio, query_sr = sf.read(uploaded_audio)
+                    if hasattr(query_audio, "ndim") and query_audio.ndim > 1:
+                        query_audio = query_audio.mean(axis=1)
                     st.audio(uploaded_audio)
+                    audio_recorded = True
 
             with voice_tab_sim:
-                spoken_command = st.selectbox("Simulate Spoken Word for Recognizer", COMMAND_WORDS, index=0)
+                sim_choice = st.selectbox("Simulate Spoken Word for Recognizer", ["-- Use Recorded Voice --"] + COMMAND_WORDS, index=0)
+                if sim_choice != "-- Use Recorded Voice --":
+                    spoken_command = sim_choice
 
             if enable_fingerprint:
                 fp_file = st.file_uploader("Upload Fingerprint Image (.bmp, .png)", type=["bmp", "png"])
@@ -257,6 +270,7 @@ with tab1:
                         t = np.linspace(0, 1.0, 16000, endpoint=False)
                         f0 = 100.0 + (target_id * 3.5)
                         query_audio = (0.5 * np.sin(2 * np.pi * f0 * t) + 0.1 * np.random.normal(0, 0.05, len(t))).astype(np.float32)
+                        query_sr = 16000
 
                     # 1. Run Pipeline
                     result = verifier.verify(
@@ -267,11 +281,15 @@ with tab1:
                     )
 
                     # 2. Command Recognition
-                    if spoken_command:
+                    if spoken_command is not None:
+                        # Explicit simulation choice override
                         recognized_word = spoken_command
                         cmd_conf = 0.98
+                    elif audio_recorded and query_audio is not None:
+                        # Genuine recorded microphone or uploaded audio
+                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio, sr=query_sr)
                     else:
-                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio)
+                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio, sr=query_sr)
 
                     # 3. Command Execution
                     exec_res = cmd_executor.execute(

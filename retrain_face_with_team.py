@@ -1,9 +1,7 @@
-"""
-Bonus 3 — Retrain face verifier including team member faces.
+"""Bonus 3 — Retrain face verifier including team member faces.
 
 Loads Olivetti (baseline) + team faces from data/team_faces/<name>/*.jpg
-Automatically rejects invalid false-positive crops (e.g. collar/chest boxes).
-Uses StandardScaler + RBF SVM pipeline for robust lighting-invariant verification.
+Uses robust preprocessing and StandardScaler + RBF SVM pipeline for robust lighting-invariant verification.
 Saves to saved_models/face_verifier_team.pkl.
 """
 import os
@@ -13,46 +11,17 @@ import numpy as np
 from pathlib import Path
 from sklearn.datasets import fetch_olivetti_faces
 from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from face_features import preprocess_face, FaceFeatureExtractor, face_cascade
+from face_features import preprocess_face, FaceFeatureExtractor
 from metrics import compute_metrics, compute_eer
 
 TEAM_FACES_DIR = Path("data/team_faces")
 
 
-def extract_clean_face(img):
-    """Detect and crop the real face, filtering out collar/chest artifacts."""
-    h, w = img.shape[:2]
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
-
-    faces = face_cascade.detectMultiScale(
-        gray, scaleFactor=1.1, minNeighbors=3, minSize=(80, 80)
-    )
-    if len(faces) == 0:
-        faces = face_cascade.detectMultiScale(
-            gray, scaleFactor=1.05, minNeighbors=2, minSize=(60, 60)
-        )
-
-    # Valid face criteria: upper half of image (y < h * 0.55) and size >= 100px
-    valid = [f for f in faces if f[1] < h * 0.55 and f[2] >= 100]
-    if len(valid) == 0:
-        # Fallback if image was already pre-cropped
-        valid = [f for f in faces if f[2] >= 80]
-        if len(valid) == 0:
-            return None, None
-
-    x, y, fw, fh = max(valid, key=lambda b: b[2] * b[3])
-    crop = gray[y:y+fh, x:x+fw]
-    resized = cv2.resize(crop, (64, 64), interpolation=cv2.INTER_AREA)
-    norm = resized.astype(np.float32) / 255.0
-    return resized, norm
-
-
 def load_team_faces():
-    """Load team faces with automatic bad-crop filtering."""
+    """Load team faces using robust face preprocessing."""
     u8_list, norm_list, labels, names = [], [], [], []
     name_map = {}
     label_id = 1000
@@ -74,7 +43,7 @@ def load_team_faces():
             img = cv2.imread(str(f))
             if img is None:
                 continue
-            u8, norm = extract_clean_face(img)
+            u8, norm = preprocess_face(img)
             if u8 is None:
                 print(f"  [Filter] Skipped invalid crop: {person_dir.name}/{f.name}")
                 continue
@@ -98,7 +67,6 @@ def prepare_trials(features, labels, enrolled_ids, impostor_ids, enroll_ratio=0.
         idxs = np.where(labels == uid)[0]
         if len(idxs) == 0:
             continue
-        # Use first 60% of samples (at least 3) for template
         n_enroll = max(3, int(len(idxs) * enroll_ratio))
         enroll_idxs = idxs[:n_enroll]
         templates[uid] = np.mean(features[enroll_idxs], axis=0)
@@ -118,7 +86,7 @@ def prepare_trials(features, labels, enrolled_ids, impostor_ids, enroll_ratio=0.
 
         imp_pool = np.where(np.isin(labels, impostor_ids) & (labels != uid))[0]
         if len(imp_pool) > 0:
-            n_imp = min(len(query_idxs) * 2, len(imp_pool))
+            n_imp = min(len(query_idxs) * 3, len(imp_pool))
             chosen = np.random.choice(imp_pool, size=n_imp, replace=False)
             for idx in chosen:
                 X_pairs.append(np.abs(features[idx] - t))
@@ -134,8 +102,12 @@ def main():
     # 1. Olivetti Baseline
     print("[Bonus3-Face] Loading Olivetti dataset...")
     raw = fetch_olivetti_faces()
-    ol_u8 = [cv2.resize((img * 255).astype(np.uint8), (64, 64)) for img in raw.images]
-    ol_norm = [cv2.resize(img.astype(np.float32), (64, 64)) for img in raw.images]
+    ol_u8 = []
+    ol_norm = []
+    for img in raw.images:
+        u, n = preprocess_face(img)
+        ol_u8.append(u)
+        ol_norm.append(n)
     ol_labels = raw.target
 
     # 2. Team Faces
@@ -169,58 +141,43 @@ def main():
 
     print(f"[Bonus3-Face] Train pairs: {len(X_train)}, Test pairs: {len(X_test)}")
 
-    # 5. Models (with StandardScaler)
-    models = {
-        "SVM (RBF) with Scaler": Pipeline([
-            ("scaler", StandardScaler()),
-            ("clf", SVC(kernel="rbf", C=10.0, probability=True, random_state=42))
-        ]),
-        "Random Forest with Scaler": Pipeline([
-            ("scaler", StandardScaler()),
-            ("clf", RandomForestClassifier(n_estimators=150, max_depth=8, random_state=42))
-        ])
+    # 5. Model: SVM (RBF) with StandardScaler
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", SVC(kernel="rbf", C=5.0, probability=True, random_state=42))
+    ])
+
+    print("\n--- Training SVM (RBF) with Scaler ---")
+    model.fit(X_train, y_train)
+
+    test_probs = model.predict_proba(X_test)[:, 1]
+    eer, opt_thresh = compute_eer(y_test, test_probs)
+    metrics = compute_metrics(y_test, test_probs, threshold=opt_thresh)
+
+    print(f"  Accuracy:  {metrics['accuracy']:.4f}")
+    print(f"  FAR:       {metrics['far']:.4f}")
+    print(f"  FRR:       {metrics['frr']:.4f}")
+    print(f"  EER:       {eer:.4f} (at threshold {opt_thresh:.4f})")
+    print(f"  AUC:       {metrics['auc']:.4f}")
+
+    # Full templates for all enrolled subjects
+    full_templates = {}
+    for uid in np.unique(all_labels):
+        idxs = np.where(all_labels == uid)[0]
+        full_templates[uid] = np.mean(all_features[idxs], axis=0)
+
+    bundle = {
+        "model": model,
+        "model_name": "SVM (RBF) with Scaler",
+        "threshold": opt_thresh,
+        "extractor": extractor,
+        "templates": full_templates,
+        "label_to_name": name_map
     }
 
-    best_bundle = None
-    best_eer = 1.0
-    best_name = None
-
-    for name, model in models.items():
-        print(f"\n--- Training {name} ---")
-        model.fit(X_train, y_train)
-
-        test_probs = model.predict_proba(X_test)[:, 1]
-        eer, opt_thresh = compute_eer(y_test, test_probs)
-        metrics = compute_metrics(y_test, test_probs, threshold=opt_thresh)
-
-        print(f"  Accuracy:  {metrics['accuracy']:.4f}")
-        print(f"  FAR:       {metrics['far']:.4f}")
-        print(f"  FRR:       {metrics['frr']:.4f}")
-        print(f"  EER:       {eer:.4f} (at threshold {opt_thresh:.4f})")
-        print(f"  AUC:       {metrics['auc']:.4f}")
-
-        if eer <= best_eer:
-            best_eer = eer
-            best_name = name
-
-            # Combine templates: all enrolled subjects
-            full_templates = {}
-            for uid in np.unique(all_labels):
-                idxs = np.where(all_labels == uid)[0]
-                full_templates[uid] = np.mean(all_features[idxs], axis=0)
-
-            best_bundle = {
-                "model": model,
-                "model_name": name,
-                "threshold": opt_thresh,
-                "extractor": extractor,
-                "templates": full_templates,
-                "label_to_name": name_map
-            }
-
     save_path = os.path.join("saved_models", "face_verifier_team.pkl")
-    joblib.dump(best_bundle, save_path)
-    print(f"\n[Bonus3-Face] Saved best face verifier ({best_name}, EER={best_eer:.4f}) to {save_path}")
+    joblib.dump(bundle, save_path)
+    print(f"\n[Bonus3-Face] Saved best face verifier (EER={eer:.4f}) to {save_path}")
     print(f"[Bonus3-Face] Enrolled subjects: {name_map}")
 
 

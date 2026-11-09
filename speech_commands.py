@@ -2,12 +2,15 @@
 
 Provides:
 - Isolated-word speech command recognizer using MFCC features + SVM / KNN classifier.
+- Hybrid recognition with Google Speech Recognition support for natural voice.
 - Role-based access control (RBAC) permission table.
 - Command executor that gates protected commands based on identity and verification status.
 - Live microphone recording support.
 """
 
 import os
+import io
+import wave
 import joblib
 import numpy as np
 import librosa
@@ -109,7 +112,7 @@ def generate_synthetic_command_data(n_samples_per_word=25, sr=16000, duration=1.
 
 
 class SpeechCommandRecognizer:
-    """Trained isolated-word speech command recognizer."""
+    """Trained isolated-word speech command recognizer with hybrid fallback."""
 
     def __init__(self, model_type="svm"):
         self.model_type = model_type
@@ -131,6 +134,45 @@ class SpeechCommandRecognizer:
 
     def predict(self, audio, sr=16000):
         """Predict command word and confidence from raw audio waveform."""
+        if audio is None or len(audio) == 0:
+            return self.words[0], 0.0
+
+        if hasattr(audio, "ndim") and audio.ndim > 1:
+            audio = audio.mean(axis=1)
+
+        # 1. Try Google Speech Recognition for live microphone / recorded human speech
+        try:
+            import speech_recognition as sr_lib
+            r = sr_lib.Recognizer()
+            audio_f32 = audio.astype(np.float32)
+            max_v = np.max(np.abs(audio_f32))
+            if max_v > 0:
+                audio_f32 = audio_f32 / max_v
+            pcm = (audio_f32 * 32767).astype(np.int16)
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(int(sr))
+                wf.writeframes(pcm.tobytes())
+            buf.seek(0)
+            with sr_lib.AudioFile(buf) as source:
+                audio_data = r.record(source)
+            text = r.recognize_google(audio_data).lower().strip()
+            
+            # Check direct match
+            for w in self.words:
+                if w in text or text in w:
+                    return w, 0.98
+
+            from difflib import get_close_matches
+            matches = get_close_matches(text, self.words, n=1, cutoff=0.5)
+            if matches:
+                return matches[0], 0.90
+        except Exception:
+            pass
+
+        # 2. Fallback to local acoustic pipeline
         feat = extract_command_features(audio, sr=sr).reshape(1, -1)
         if hasattr(self.pipeline.named_steps["clf"], "predict_proba"):
             probs = self.pipeline.predict_proba(feat)[0]
@@ -253,4 +295,3 @@ def record_live_command(duration=1.5, sr=16000):
     except Exception as e:
         print(f"[-] Could not record microphone audio: {e}")
         return None
-

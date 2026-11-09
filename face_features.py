@@ -4,6 +4,7 @@ from skimage.feature import hog, local_binary_pattern
 from sklearn.decomposition import PCA
 
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+face_cascade_alt2 = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml')
 
 def preprocess_face(img, target_size=(64, 64)):
     if img.dtype != np.uint8:
@@ -14,18 +15,37 @@ def preprocess_face(img, target_size=(64, 64)):
     if len(img_uint8.shape) == 3:
         gray = cv2.cvtColor(img_uint8, cv2.COLOR_BGR2GRAY)
     else:
-        gray = img_uint8
+        gray = img_uint8.copy()
 
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(30, 30))
-    if len(faces) == 0:
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=2, minSize=(30, 30))
+    h, w = gray.shape[:2]
+
+    # Search for faces if image is sufficiently large
+    faces = []
+    if h > 80 and w > 80:
+        for casc in [face_cascade_alt2, face_cascade]:
+            for sf, mn in [(1.1, 3), (1.05, 2)]:
+                dets = casc.detectMultiScale(gray, scaleFactor=sf, minNeighbors=mn, minSize=(60, 60))
+                # Reject false positives in lower portion of frame (collar/shirt)
+                valid = [d for d in dets if d[1] < h * 0.60 and d[2] >= 60]
+                if len(valid) > 0:
+                    faces = valid
+                    break
+            if len(faces) > 0:
+                break
+
     if len(faces) > 0:
-        x, y, w, h = max(faces, key=lambda b: b[2] * b[3])
-        gray = gray[y:y+h, x:x+w]
+        x, y, fw, fh = max(faces, key=lambda b: b[2] * b[3])
+        mx = int(fw * 0.05)
+        my = int(fh * 0.05)
+        crop = gray[max(0, y - my):min(h, y + fh + my), max(0, x - mx):min(w, x + fw + mx)]
+    else:
+        crop = gray
 
-    resized = cv2.resize(gray, target_size, interpolation=cv2.INTER_AREA)
-    norm = resized.astype(np.float32) / 255.0
-    return resized, norm
+    resized = cv2.resize(crop, target_size, interpolation=cv2.INTER_AREA)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    eq = clahe.apply(resized)
+    norm = eq.astype(np.float32) / 255.0
+    return eq, norm
 
 def extract_hog(norm_img):
     return hog(norm_img, orientations=8, pixels_per_cell=(8, 8), cells_per_block=(2, 2))

@@ -60,16 +60,26 @@ class HierarchicalVerifier:
     @property
     def enrolled_identities(self):
         """List of enrolled identity IDs available in the pipeline."""
+        ids = set()
+        if self.face_bundle and "templates" in self.face_bundle:
+            ids.update(self.face_bundle["templates"].keys())
         if self.fusion_bundle and "templates" in self.fusion_bundle:
-            return sorted(list(self.fusion_bundle["templates"].keys()))
-        elif self.face_bundle and "templates" in self.face_bundle:
-            return sorted(list(self.face_bundle["templates"].keys()))
-        return []
+            ids.update(self.fusion_bundle["templates"].keys())
+        return sorted(list(ids))
 
     def compute_face_score(self, face_feat, claimed_id):
         """Compute genuine probability for face."""
         if self.face_bundle is None or claimed_id not in self.face_bundle["templates"]:
             return 0.0
+
+        # If raw image array is passed, extract features
+        if hasattr(face_feat, "ndim") and face_feat.ndim in (2, 3) and face_feat.shape[0] > 1 and face_feat.shape[1] > 1:
+            extractor = self.face_bundle["extractor"]
+            u8, norm = preprocess_face(face_feat)
+            face_feat = extractor.extract(u8, norm)
+        else:
+            face_feat = np.asarray(face_feat).ravel()
+
         template = self.face_bundle["templates"][claimed_id]
         diff = np.abs(face_feat - template).reshape(1, -1)
         prob = self.face_bundle["model"].predict_proba(diff)[0, 1]
@@ -80,6 +90,20 @@ class HierarchicalVerifier:
         if self.fusion_bundle is None or claimed_id not in self.fusion_bundle["templates"]:
             return 0.0
         
+        # If raw image array is passed
+        if hasattr(face_feat, "ndim") and face_feat.ndim in (2, 3) and face_feat.shape[0] > 1 and face_feat.shape[1] > 1:
+            extractor = self.face_bundle["extractor"] if self.face_bundle else self.fusion_bundle.get("face_extractor")
+            u8, norm = preprocess_face(face_feat)
+            face_feat = extractor.extract(u8, norm)
+        else:
+            face_feat = np.asarray(face_feat).ravel()
+
+        # If raw audio waveform is passed
+        if hasattr(voice_feat, "ndim") and voice_feat.ndim == 1 and len(voice_feat) > 100:
+            voice_feat = extract_voice_features(voice_feat)
+        else:
+            voice_feat = np.asarray(voice_feat).ravel()
+
         scaler_face = self.fusion_bundle["scaler_face"]
         scaler_voice = self.fusion_bundle["scaler_voice"]
         template = self.fusion_bundle["templates"][claimed_id]
@@ -96,6 +120,13 @@ class HierarchicalVerifier:
         """Compute genuine probability for fingerprint."""
         if self.fingerprint_bundle is None or claimed_id not in self.fingerprint_bundle["templates"]:
             return 0.0
+
+        if hasattr(fingerprint_feat, "ndim") and fingerprint_feat.ndim == 2 and fingerprint_feat.shape[0] > 20:
+            u8_fp, norm_fp = preprocess_fingerprint(fingerprint_feat)
+            fingerprint_feat = extract_fingerprint_features(u8_fp, norm_fp)
+        else:
+            fingerprint_feat = np.asarray(fingerprint_feat).ravel()
+
         template = self.fingerprint_bundle["templates"][claimed_id]
         diff = np.abs(fingerprint_feat - template).reshape(1, -1)
         prob = self.fingerprint_bundle["model"].predict_proba(diff)[0, 1]
@@ -127,8 +158,7 @@ class HierarchicalVerifier:
                 - reason: str (explanation of the decision path)
         """
         # Ensure feature extraction if raw face image is provided
-        if face_input.ndim in (2, 3) and face_input.shape[0] > 1 and face_input.shape[1] > 1:
-            # Likely 2D or 3D raw image
+        if hasattr(face_input, "ndim") and face_input.ndim in (2, 3) and face_input.shape[0] > 1 and face_input.shape[1] > 1:
             extractor = self.face_bundle["extractor"]
             u8, norm = preprocess_face(face_input)
             face_feat = extractor.extract(u8, norm)
@@ -168,8 +198,7 @@ class HierarchicalVerifier:
                 "reason": f"UNCERTAIN in Stage 1 ({self.theta_low:.3f} <= score {face_score:.3f} < {self.theta_high:.3f}). Voice input required for Stage 2 Fusion."
             }
 
-        if voice_input.ndim == 1 and len(voice_input) > 100:
-            # Raw audio waveform
+        if hasattr(voice_input, "ndim") and voice_input.ndim == 1 and len(voice_input) > 100:
             voice_feat = extract_voice_features(voice_input)
         else:
             voice_feat = np.asarray(voice_input).ravel()
@@ -178,7 +207,7 @@ class HierarchicalVerifier:
 
         # Step 3: Optional Fingerprint Modality (Stage 3)
         if fingerprint_input is not None and self.fingerprint_bundle is not None:
-            if fingerprint_input.ndim == 2 and fingerprint_input.shape[0] > 20:
+            if hasattr(fingerprint_input, "ndim") and fingerprint_input.ndim == 2 and fingerprint_input.shape[0] > 20:
                 u8_fp, norm_fp = preprocess_fingerprint(fingerprint_input)
                 fp_feat = extract_fingerprint_features(u8_fp, norm_fp)
             else:
@@ -219,15 +248,7 @@ def tune_hierarchical_thresholds(
     target_stage2_max=0.35,
     min_stage2_escalation=0.10
 ):
-    """Tune upper and lower thresholds (theta_low, theta_high) on validation trials.
-
-    Objective:
-        Maximize validation accuracy while bounding the fraction of samples escalating
-        to Stage 2 within an optimal operational window [min_stage2_escalation, target_stage2_max].
-
-    Returns:
-        best_theta_low, best_theta_high, best_metrics
-    """
+    """Tune upper and lower thresholds (theta_low, theta_high) on validation trials."""
     y_true = np.asarray(y_true).astype(int)
     face_scores = np.asarray(face_scores).astype(float)
     fusion_scores = np.asarray(fusion_scores).astype(float)
@@ -282,4 +303,3 @@ def tune_hierarchical_thresholds(
                 }
 
     return best_pair[0], best_pair[1], best_res
-
