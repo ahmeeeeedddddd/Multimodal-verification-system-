@@ -1,18 +1,3 @@
-"""Task 6: Hierarchical Verification Pipeline and Demo Benchmark.
-
-Implements:
-1. Hierarchical verification (Stage 1 Face -> Stage 2 Fusion, with optional Fingerprint).
-2. Threshold tuning (theta_low, theta_high) on validation data.
-3. Comparison against alternatives:
-   - Hierarchical (Face -> Fusion)
-   - Always-Fusion (100% evaluated by multimodal fusion)
-   - Voice-First Hierarchical (Stage 1 Voice -> Stage 2 Fusion)
-   - Face-Only baseline
-   - Voice-Only baseline
-4. Comprehensive biometric evaluation: Accuracy, FAR, FRR, EER, AUC, Precision, Recall, F1, and Stage 2 fraction.
-5. Saves ROC and DET comparison curves and tuned pipeline bundle.
-"""
-
 import os
 import time
 import joblib

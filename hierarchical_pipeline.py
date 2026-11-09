@@ -1,17 +1,3 @@
-"""Task 6: Hierarchical Multimodal Verification Pipeline.
-
-Architecture:
-- Stage 1: Face verification (fast path).
-    - If score >= theta_high: Confident Genuine -> ACCEPT (Stage 1).
-    - If score < theta_low:   Confident Impostor -> REJECT (Stage 1).
-    - If theta_low <= score < theta_high: UNCERTAIN -> Escalate to Stage 2.
-- Stage 2: Early Fusion (Face + Voice).
-    - Evaluates fused representation against claimed template.
-    - If score >= theta_fusion: ACCEPT; else REJECT.
-- Optional Stage 3: Fingerprint modality verification (Bonus 4 integration).
-    - Acts as additional security tie-breaker or tri-modal verification.
-"""
-
 import os
 import joblib
 import numpy as np

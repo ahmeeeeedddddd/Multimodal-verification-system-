@@ -1,13 +1,3 @@
-"""Task 2: Fingerprint Verification Module.
-
-- Loads SOCOFing dataset (from data/socofing or downloads via Kaggle API / generates synthetic fallback)
-- Preprocesses: resize (96x96), CLAHE ridge enhancement, normalization
-- Extracts: Gabor filters, HOG, and LBP features
-- Trains 2+ models: SVM (RBF) and Random Forest
-- Evaluates: Genuine probability, EER, FAR, FRR, ROC-AUC, thresholding
-- Saves best verifier bundle to saved_models/fingerprint_verifier.pkl
-"""
-
 import os
 import glob
 import re

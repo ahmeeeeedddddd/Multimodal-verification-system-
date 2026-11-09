@@ -1,14 +1,3 @@
-"""04 — Train Stage 2 Multimodal Fusion Verifier.
-
-Early-fusion (Face + Voice) model combining HOG+LBP+PCA face features
-with MFCC+ZCR+RMS voice features into a unified multimodal vector.
-Enrolls:
-- Benchmark subjects: 28 through 34
-- Team members: 1000 (Ahmed), 1001 (Mohamed)
-Saves:
-- saved_models/fusion_verifier.pkl
-"""
-
 import os
 import glob
 import cv2

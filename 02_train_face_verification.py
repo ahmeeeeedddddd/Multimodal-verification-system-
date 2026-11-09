@@ -1,12 +1,3 @@
-"""02 — Train Stage 1 Face Verification Model.
-
-Loads Olivetti (baseline 40 subjects) + enrolled team member faces.
-Extracts HOG + LBP + PCA representations and trains an RBF SVM + StandardScaler pipeline.
-Saves:
-- saved_models/face_verifier_team.pkl (with all subjects + team members)
-- saved_models/face_verifier.pkl
-"""
-
 import os
 import cv2
 import joblib

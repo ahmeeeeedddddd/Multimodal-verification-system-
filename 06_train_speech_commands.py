@@ -1,12 +1,3 @@
-"""06 — Train Speech Command Recognizer.
-
-Trains the isolated-word speech command recognizer on standard vocabulary:
-['unlock', 'open', 'status', 'lights', 'delete', 'start', 'stop', 'help']
-using MFCC feature extraction + RBF SVM classifier.
-Saves:
-- saved_models/command_recognizer.pkl
-"""
-
 import os
 import soundfile as sf
 import numpy as np

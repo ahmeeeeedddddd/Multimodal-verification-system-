@@ -11,5 +11,3 @@ tqdm
 opencv-python
 scikit-image
 streamlit
-facenet-pytorch
-SpeechRecognition

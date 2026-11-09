@@ -1,12 +1,3 @@
-"""
-08_launch_streamlit_app.py
-===========================
-Convenience entry point to launch the interactive Streamlit Biometric Dashboard.
-Execution:
-    python 08_launch_streamlit_app.py
-or:
-    streamlit run app.py
-"""
 import subprocess
 import sys
 

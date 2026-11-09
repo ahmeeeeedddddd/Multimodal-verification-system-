@@ -98,10 +98,21 @@ st.sidebar.markdown(f"**Assigned Role:** `{role_badge_colors.get(role, role.capi
 st.sidebar.markdown(f"**Allowed Commands:** `{', '.join(ROLE_PERMISSIONS.get(role, []))}`")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Hierarchical Thresholds")
+verification_mode = st.sidebar.selectbox(
+    "🎯 Verification Mode",
+    [
+        "Hierarchical Verification Pipeline",
+        "Face-Only Verification",
+        "Voice-Only Verification",
+        "Multimodal Early Fusion"
+    ],
+    index=0
+)
+
+st.sidebar.subheader("⚙️ Verification Thresholds")
 theta_low = st.sidebar.slider("θ_low (Stage 1 Reject)", 0.05, 0.45, float(verifier.theta_low), 0.01)
-theta_high = st.sidebar.slider("θ_high (Stage 1 Accept)", 0.50, 0.95, float(verifier.theta_high), 0.01)
-theta_fusion = st.sidebar.slider("θ_fusion (Stage 2 Fusion)", 0.30, 0.70, float(verifier.theta_fusion), 0.01)
+theta_high = st.sidebar.slider("θ_high (Stage 1 Accept / Face Only)", 0.50, 0.95, float(verifier.theta_high), 0.01)
+theta_fusion = st.sidebar.slider("θ_fusion (Stage 2 Fusion / Voice Only)", 0.30, 0.70, float(verifier.theta_fusion), 0.01)
 enable_fingerprint = st.sidebar.checkbox("Enable Stage 3 Fingerprint Verification", value=False)
 
 verifier.theta_low = theta_low
@@ -301,30 +312,77 @@ with tab1:
                     else:
                         st.info("No fingerprint image uploaded. Stage 3 will be skipped.")
 
-        verify_btn = st.button("🔍 Execute Hierarchical Verification & Command", type="primary", width="stretch")
+        verify_btn = st.button(f"🔍 Execute {verification_mode} & Command", type="primary", width="stretch")
 
     with col_result:
         st.subheader("2. Pipeline Diagnostics & Action Log")
 
         if verify_btn:
-            if query_face is None:
+            if verification_mode == "Voice-Only Verification" and query_audio is None and not audio_recorded:
+                st.error("Please record or upload a voice sample to test Voice-Only verification.")
+            elif verification_mode != "Voice-Only Verification" and query_face is None:
                 st.error("Please provide or capture a face image to start verification.")
             else:
                 with st.spinner("Processing biometric representations through pipeline..."):
-                    # Synthetic voice fallback if none provided
+                    # Synthetic voice fallback if none provided for multimodal/hierarchical
                     if query_audio is None:
                         t = np.linspace(0, 1.0, 16000, endpoint=False)
                         f0 = 100.0 + (target_id * 3.5)
                         query_audio = (0.5 * np.sin(2 * np.pi * f0 * t) + 0.1 * np.random.normal(0, 0.05, len(t))).astype(np.float32)
                         query_sr = 16000
 
-                    # 1. Run Pipeline
-                    result = verifier.verify(
-                        face_input=query_face,
-                        voice_input=query_audio,
-                        fingerprint_input=query_fp if enable_fingerprint else None,
-                        claimed_id=target_id
-                    )
+                    # 1. Run Pipeline according to selected Verification Mode
+                    if verification_mode == "Face-Only Verification":
+                        face_s = verifier.compute_face_score(query_face, target_id)
+                        acc = face_s >= theta_high
+                        result = {
+                            "verified": bool(acc),
+                            "stage_reached": 1,
+                            "face_score": face_s,
+                            "fusion_score": None,
+                            "fingerprint_score": None,
+                            "reason": f"Face-Only Mode: Score {face_s*100:.1f}% {' >= ' if acc else ' < '} threshold {theta_high*100:.1f}%"
+                        }
+                    elif verification_mode == "Voice-Only Verification":
+                        from voice_features import extract_voice_features
+                        v_feat = extract_voice_features(query_audio, sr=query_sr)
+                        if verifier.fusion_bundle and target_id in verifier.fusion_bundle["templates"]:
+                            s_v = verifier.fusion_bundle["scaler_voice"]
+                            v_norm = s_v.transform(v_feat.reshape(1, -1))
+                            v_tmpl = verifier.fusion_bundle["templates"][target_id][0, 1618:]
+                            dist = float(np.linalg.norm(v_norm - v_tmpl))
+                            v_score = float(np.exp(-dist / 8.0))
+                        else:
+                            v_score = 0.50
+                        acc = v_score >= theta_fusion
+                        result = {
+                            "verified": bool(acc),
+                            "stage_reached": 2,
+                            "face_score": 0.0,
+                            "fusion_score": v_score,
+                            "fingerprint_score": None,
+                            "reason": f"Voice-Only Mode: Score {v_score*100:.1f}% {' >= ' if acc else ' < '} threshold {theta_fusion*100:.1f}%"
+                        }
+                    elif verification_mode == "Multimodal Early Fusion":
+                        fus_s = verifier.compute_fusion_score(query_face, query_audio, target_id)
+                        face_s = verifier.compute_face_score(query_face, target_id)
+                        acc = fus_s >= theta_fusion
+                        result = {
+                            "verified": bool(acc),
+                            "stage_reached": 2,
+                            "face_score": face_s,
+                            "fusion_score": fus_s,
+                            "fingerprint_score": None,
+                            "reason": f"Early Fusion Mode: Combined Face+Voice Score {fus_s*100:.1f}% {' >= ' if acc else ' < '} threshold {theta_fusion*100:.1f}%"
+                        }
+                    else:
+                        # Full Hierarchical Pipeline
+                        result = verifier.verify(
+                            face_input=query_face,
+                            voice_input=query_audio,
+                            fingerprint_input=query_fp if enable_fingerprint else None,
+                            claimed_id=target_id
+                        )
 
                     # 2. Command Recognition
                     if spoken_command is not None:
