@@ -13,3 +13,6 @@ data/speech_commands/
 scratch/
 data/team_faces_raw/
 *.log
+
+# Project Conceptual Guide
+CONCEPTS_EXPLANATION.md
