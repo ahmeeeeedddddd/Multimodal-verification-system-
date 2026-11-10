@@ -109,6 +109,17 @@ verification_mode = st.sidebar.selectbox(
     index=0
 )
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎙️ Command Engine")
+cmd_engine = st.sidebar.radio(
+    "Select Recognizer:",
+    ["Google ASR (High Accuracy Live)", "Traditional ML Only (MFCC + SVM)"],
+    index=0,
+    help="Switch to 'Traditional ML Only' to test 100% offline traditional ML (MFCC+SVM) without any external APIs."
+)
+prefer_asr = (cmd_engine == "Google ASR (High Accuracy Live)")
+
+st.sidebar.markdown("---")
 st.sidebar.subheader("⚙️ Verification Thresholds")
 theta_low = st.sidebar.slider("θ_low (Stage 1 Reject)", 0.05, 0.45, float(verifier.theta_low), 0.01)
 theta_high = st.sidebar.slider("θ_high (Stage 1 Accept / Face Only)", 0.50, 0.95, float(verifier.theta_high), 0.01)
@@ -390,9 +401,9 @@ with tab1:
                         cmd_conf = 0.98
                     elif audio_recorded and query_audio is not None:
                         # Genuine recorded microphone or uploaded audio
-                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio, sr=query_sr)
+                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio, sr=query_sr, prefer_asr=prefer_asr)
                     else:
-                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio, sr=query_sr)
+                        recognized_word, cmd_conf = cmd_recognizer.predict(query_audio, sr=query_sr, prefer_asr=prefer_asr)
 
                     # 3. Command Execution
                     exec_res = cmd_executor.execute(
@@ -447,6 +458,7 @@ with tab1:
                 cmd_col1, cmd_col2 = st.columns([1, 1])
                 with cmd_col1:
                     st.markdown(f"**Detected Word:** `{recognized_word.upper()}` (Confidence: {cmd_conf*100:.1f}%)")
+                    st.markdown(f"**Engine Used:** `{'Google ASR' if (prefer_asr and spoken_command is None) else 'Traditional ML (MFCC + SVM)'}`")
                     st.markdown(f"**User Role:** `{exec_res['role'].upper()}`")
                 with cmd_col2:
                     if exec_res["status"] == "SUCCESS":
