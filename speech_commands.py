@@ -144,15 +144,70 @@ class SpeechCommandRecognizer:
         self.pipeline.fit(X, y)
         return self
 
-    def predict(self, audio, sr=16000):
-        """Predict command word and confidence from raw audio waveform using traditional ML (MFCC+SVM)."""
+    def predict(self, audio, sr=16000, prefer_asr=True):
+        """Predict command word and confidence from raw audio waveform.
+        
+        Uses Google Speech Recognition (Cloud ASR) for high-accuracy live microphone
+        speech, with automatic seamless fallback to local traditional ML (MFCC + SVM).
+        """
         if audio is None or len(audio) == 0:
             return self.words[0], 0.0
 
         if hasattr(audio, "ndim") and audio.ndim > 1:
             audio = audio.mean(axis=1)
 
-        # Traditional ML feature extraction: MFCC + Delta + ZCR + RMS
+        # 1. High-Accuracy Google Speech Recognition (Primary for Live Human Voice)
+        if prefer_asr:
+            try:
+                import io
+                import wave
+                import speech_recognition as sr_lib
+                from difflib import get_close_matches
+
+                r = sr_lib.Recognizer()
+                # Preprocess audio to 16kHz float32
+                audio_f32 = audio.astype(np.float32)
+                if sr != 16000 and len(audio_f32) > 0:
+                    audio_f32 = librosa.resample(audio_f32, orig_sr=sr, target_sr=16000)
+                    sr = 16000
+
+                max_v = np.max(np.abs(audio_f32))
+                if max_v > 0:
+                    audio_f32 = audio_f32 / max_v
+
+                pcm = (np.clip(audio_f32, -1.0, 1.0) * 32767).astype(np.int16)
+                buf = io.BytesIO()
+                with wave.open(buf, 'wb') as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(int(sr))
+                    wf.writeframes(pcm.tobytes())
+                buf.seek(0)
+
+                with sr_lib.AudioFile(buf) as source:
+                    audio_data = r.record(source)
+
+                text = r.recognize_google(audio_data).lower().strip()
+                tokens = text.split()
+
+                # Check exact match in tokens
+                for w in self.words:
+                    if w in tokens or w == text:
+                        return w, 0.98
+
+                # Check substring match
+                for w in self.words:
+                    if w in text or text in w:
+                        return w, 0.95
+
+                # Fuzzy phoneme/spelling match
+                matches = get_close_matches(text, self.words, n=1, cutoff=0.45)
+                if matches:
+                    return matches[0], 0.88
+            except Exception:
+                pass
+
+        # 2. Traditional ML Fallback: MFCC + Delta + ZCR + RMS -> Scaler -> RBF SVM
         feat = extract_command_features(audio, sr=sr).reshape(1, -1)
         if hasattr(self.pipeline.named_steps["clf"], "predict_proba"):
             probs = self.pipeline.predict_proba(feat)[0]

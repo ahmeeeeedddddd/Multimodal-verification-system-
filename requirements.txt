@@ -11,3 +11,4 @@ tqdm
 opencv-python
 scikit-image
 streamlit
+SpeechRecognition

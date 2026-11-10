@@ -147,6 +147,28 @@ def main():
                 "templates": test_templates
             }
 
+    # Enroll team members (1000 Ahmed, 1001 Mohamed)
+    rng_fp = np.random.RandomState(42)
+    size_fp = (96, 96)
+    yc, xc = np.mgrid[0:96, 0:96]
+    for uid in [1000, 1001]:
+        freq = 0.10 + (uid % 5) * 0.02
+        cx = 48 + np.sin(uid) * 12
+        cy = 48 + np.cos(uid) * 12
+        feats = []
+        for _ in range(8):
+            nx = rng_fp.uniform(-1.5, 1.5)
+            ny = rng_fp.uniform(-1.5, 1.5)
+            r = np.sqrt((xc - cx - nx)**2 + (yc - cy - ny)**2)
+            th = np.arctan2(yc - cy - ny, xc - cx - nx)
+            pat = 0.5 + 0.5 * np.cos(2 * np.pi * freq * r + 2 * th)
+            noise = rng_fp.normal(0, 0.04, size_fp)
+            img = np.clip(pat + noise, 0, 1).astype(np.float32)
+            u8, norm = preprocess_fingerprint(img)
+            feats.append(extract_fingerprint_features(u8, norm))
+        best_bundle["templates"][uid] = np.mean(feats, axis=0)
+        print(f"[Task 2] Enrolled team fingerprint template for ID {uid}")
+
     save_path = os.path.join("saved_models", "fingerprint_verifier.pkl")
     joblib.dump(best_bundle, save_path)
     print(f"\n[Task 2] Saved best fingerprint verifier ({best_model_name}) to {save_path}")
