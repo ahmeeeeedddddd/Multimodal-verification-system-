@@ -171,6 +171,12 @@ class SpeechCommandRecognizer:
                     audio_f32 = librosa.resample(audio_f32, orig_sr=sr, target_sr=16000)
                     sr = 16000
 
+                # Trim leading/trailing silence from microphone recording
+                if len(audio_f32) > 2000:
+                    trimmed, _ = librosa.effects.trim(audio_f32, top_db=18)
+                    if len(trimmed) >= 2000:
+                        audio_f32 = trimmed
+
                 max_v = np.max(np.abs(audio_f32))
                 if max_v > 0:
                     audio_f32 = audio_f32 / max_v
@@ -185,23 +191,40 @@ class SpeechCommandRecognizer:
                 buf.seek(0)
 
                 with sr_lib.AudioFile(buf) as source:
+                    r.adjust_for_ambient_noise(source, duration=0.08)
                     audio_data = r.record(source)
 
                 text = r.recognize_google(audio_data).lower().strip()
                 tokens = text.split()
 
-                # Check exact match in tokens
+                # 1. Exact match in tokens
                 for w in self.words:
                     if w in tokens or w == text:
                         return w, 0.98
 
-                # Check substring match
+                # 2. Known homophone / acoustic alias mapping
+                aliases = {
+                    'open': ['open', 'hoping', 'oven', 'opin', 'opening', 'oppen'],
+                    'unlock': ['unlock', 'lock', 'unlocked', 'on lock', 'anlock'],
+                    'status': ['status', 'statue', 'state us', 'states'],
+                    'lights': ['lights', 'light', 'lite', 'lites'],
+                    'delete': ['delete', 'the lead', 'delet', 'del'],
+                    'start': ['start', 'star', 'started'],
+                    'stop': ['stop', 'stopped', 'stopp'],
+                    'help': ['help', 'helped', 'health']
+                }
+                for target_cmd, alias_list in aliases.items():
+                    for al in alias_list:
+                        if al in tokens or al in text:
+                            return target_cmd, 0.96
+
+                # 3. Substring match
                 for w in self.words:
                     if w in text or text in w:
                         return w, 0.95
 
-                # Fuzzy phoneme/spelling match
-                matches = get_close_matches(text, self.words, n=1, cutoff=0.45)
+                # 4. Fuzzy phoneme/spelling match
+                matches = get_close_matches(text, self.words, n=1, cutoff=0.40)
                 if matches:
                     return matches[0], 0.88
             except Exception:

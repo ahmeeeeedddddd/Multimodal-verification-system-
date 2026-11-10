@@ -278,12 +278,13 @@ with tab1:
                         query_audio = query_audio.mean(axis=1)
                     audio_recorded = True
                 mic_override = st.selectbox(
-                    "Command Word Spoken (Auto-Detect or Select):",
-                    ["-- Auto-Detect via MFCC-SVM --"] + COMMAND_WORDS,
+                    "Command Spoken (Auto-Detect or Choose Word):",
+                    ["-- Auto-Detect from Voice Audio --"] + COMMAND_WORDS,
                     index=0,
-                    key="mic_cmd_select"
+                    key="mic_cmd_select",
+                    help="Auto-Detect uses the active speech engine (Google ASR / MFCC-SVM). You can also select the word directly to guarantee execution during demos."
                 )
-                if mic_override != "-- Auto-Detect via MFCC-SVM --":
+                if mic_override != "-- Auto-Detect from Voice Audio --":
                     spoken_command = mic_override
 
             with voice_tab_upload:
