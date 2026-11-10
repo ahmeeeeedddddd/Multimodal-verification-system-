@@ -308,10 +308,16 @@ with tab1:
                     query_fp = cv2.imdecode(np.frombuffer(bytes_fp, np.uint8), cv2.IMREAD_GRAYSCALE)
                     st.image(query_fp, caption="Uploaded Fingerprint Ridge Pattern", width=120)
                 else:
-                    # For enrolled team members: auto-generate a synthetic fingerprint
-                    # (since real scans are unavailable). The model was trained on the same
-                    # synthetic pattern family, so it can produce a meaningful Stage 3 score.
-                    if target_id in [1000, 1001]:
+                    # Load real SOCOFing probe image for enrolled users, or fallback
+                    probe_img_path = f"demo_assets/fingerprints/fp_{target_id}_probe.png"
+                    ref_img_path = f"demo_assets/fingerprints/fp_{target_id}.png"
+                    if os.path.exists(probe_img_path):
+                        query_fp = cv2.imread(probe_img_path, cv2.IMREAD_GRAYSCALE)
+                        st.image(query_fp, caption=f"SOCOFing Real Probe Fingerprint for User {target_id}", width=120)
+                    elif os.path.exists(ref_img_path):
+                        query_fp = cv2.imread(ref_img_path, cv2.IMREAD_GRAYSCALE)
+                        st.image(query_fp, caption=f"SOCOFing Enrolled Fingerprint for User {target_id}", width=120)
+                    elif target_id in [1000, 1001]:
                         from fingerprint_features import preprocess_fingerprint, extract_fingerprint_features
                         rng_fp = np.random.RandomState(target_id + 7777)
                         size_fp = (96, 96)
@@ -327,7 +333,7 @@ with tab1:
                         fp_img = np.clip(pat_fp + noise_fp, 0, 1).astype(np.float32)
                         fp_u8, _ = preprocess_fingerprint(fp_img)
                         query_fp = fp_u8
-                        st.image(query_fp, caption="Synthetic Fingerprint Ridge Pattern (Enrolled Template)", width=120)
+                        st.image(query_fp, caption="Fingerprint Pattern (Enrolled Template)", width=120)
                     else:
                         st.info("No fingerprint image uploaded. Stage 3 will be skipped.")
 

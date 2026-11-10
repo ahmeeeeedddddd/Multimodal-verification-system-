@@ -1,145 +1,194 @@
 import os
 import glob
 import re
+import shutil
 import joblib
+import cv2
 import numpy as np
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 from fingerprint_features import preprocess_fingerprint, extract_fingerprint_features
 from metrics import compute_metrics, compute_eer
 
-SOCOFING_CANDIDATES = [
+SOCOFING_REAL_CANDIDATES = [
     os.path.join("data", "socofing", "SOCOFing", "Real"),
     os.path.join("data", "socofing", "Real"),
     os.path.join("data", "SOCOFing", "Real"),
     os.path.join("data", "socofing"),
 ]
 
-def get_socofing_dir():
-    for candidate in SOCOFING_CANDIDATES:
-        if os.path.exists(candidate):
-            files = glob.glob(os.path.join(candidate, "*.BMP")) + glob.glob(os.path.join(candidate, "*.bmp"))
+SOCOFING_ALTERED_CANDIDATES = [
+    os.path.join("data", "socofing", "SOCOFing", "Altered", "Altered-Easy"),
+    os.path.join("data", "socofing", "Altered", "Altered-Easy"),
+    os.path.join("data", "SOCOFing", "Altered", "Altered-Easy"),
+    os.path.join("data", "socofing", "SOCOFing", "Altered"),
+]
+
+def get_socofing_dirs():
+    real_dir = None
+    for cand in SOCOFING_REAL_CANDIDATES:
+        if os.path.exists(cand):
+            files = glob.glob(os.path.join(cand, "*.BMP")) + glob.glob(os.path.join(cand, "*.bmp"))
             if len(files) > 0:
-                return candidate
-    return None
+                real_dir = cand
+                break
 
-def load_socofing_images(max_subjects=40, samples_per_subject=10):
-    """Loads SOCOFing images from disk if present, else generates high-quality synthetic fingerprint data."""
-    socofing_dir = get_socofing_dir()
-    if socofing_dir is not None:
-        files = glob.glob(os.path.join(socofing_dir, "*.BMP")) + glob.glob(os.path.join(socofing_dir, "*.bmp"))
-        if len(files) > 0:
-            print(f"[Task 2] Found {len(files)} SOCOFing images on disk.")
-            subject_dict = {}
-            pattern = re.compile(r"^(\d+)__.*\.BMP$", re.IGNORECASE)
-            for f in files:
-                m = pattern.match(os.path.basename(f))
-                if m:
-                    sub_id = int(m.group(1))
-                    subject_dict.setdefault(sub_id, []).append(f)
+    altered_dir = None
+    for cand in SOCOFING_ALTERED_CANDIDATES:
+        if os.path.exists(cand):
+            files = glob.glob(os.path.join(cand, "*.BMP")) + glob.glob(os.path.join(cand, "*.bmp"))
+            if len(files) > 0:
+                altered_dir = cand
+                break
 
-            valid_subs = [s for s, imgs in subject_dict.items() if len(imgs) >= samples_per_subject]
-            if len(valid_subs) >= max_subjects:
-                valid_subs = sorted(valid_subs)[:max_subjects]
-                features, labels = [], []
-                for label_idx, sub_id in enumerate(valid_subs):
-                    for img_path in subject_dict[sub_id][:samples_per_subject]:
-                        u8, norm = preprocess_fingerprint(img_path)
-                        feat = extract_fingerprint_features(u8, norm)
-                        features.append(feat)
-                        labels.append(label_idx)
-                return np.array(features), np.array(labels)
+    return real_dir, altered_dir
 
-    print("[Task 2] Real SOCOFing images not yet downloaded locally.")
-    print("[Task 2] Generating synthetic fingerprint ridge flow dataset (40 subjects, 10 samples each)...")
-    np.random.seed(42)
-    features, labels = [], []
+def load_socofing_dataset(n_subjects=80, seed=42):
+    """
+    Loads real SOCOFing fingerprint data using rigorous biometric protocol:
+    - Enrolled template = Pristine fingerprint from 'Real' directory.
+    - Genuine probes = Altered impressions (rotation, scratch, cuts) of the SAME finger from 'Altered' directory.
+    - Impostor probes = Altered impressions from DIFFERENT subjects/fingers.
+    """
+    real_dir, altered_dir = get_socofing_dirs()
+    if real_dir is not None and altered_dir is not None:
+        print(f"[Task 2] Found real SOCOFing dataset:\n  Real: {real_dir}\n  Altered: {altered_dir}")
+        real_imgs = {}
+        probe_imgs = {}
+
+        # Look for Right index fingers across subjects
+        for s in range(1, 400):
+            if len(real_imgs) >= n_subjects:
+                break
+            r_files = glob.glob(os.path.join(real_dir, f"{s}__*_Right_index_finger.BMP"))
+            if len(r_files) > 0:
+                a_files = glob.glob(os.path.join(altered_dir, f"{s}__*_Right_index_finger_*.BMP"))
+                if len(a_files) >= 2:
+                    real_imgs[s] = r_files[0]
+                    probe_imgs[s] = a_files[:3]
+
+        valid_subs = list(real_imgs.keys())
+        if len(valid_subs) >= 20:
+            print(f"[Task 2] Enrolling {len(valid_subs)} unique human fingers from SOCOFing...")
+            templates = {}
+            probes = {}
+            for s in valid_subs:
+                u8_r, norm_r = preprocess_fingerprint(real_imgs[s])
+                templates[s] = extract_fingerprint_features(u8_r, norm_r)
+                probes[s] = []
+                for p_path in probe_imgs[s]:
+                    u8_p, norm_p = preprocess_fingerprint(p_path)
+                    probes[s].append(extract_fingerprint_features(u8_p, norm_p))
+
+            return templates, probes, valid_subs, real_imgs, probe_imgs
+
+    # Fallback to high-quality synthetic fingerprint generation if dataset is not found
+    print("[Task 2] Real SOCOFing dataset not found locally. Generating synthetic ridge flow dataset...")
+    np.random.seed(seed)
+    valid_subs = list(range(n_subjects))
+    templates = {}
+    probes = {}
     size = (96, 96)
     y_coords, x_coords = np.mgrid[0:size[0], 0:size[1]]
 
-    for sub_id in range(max_subjects):
-        # Unique fingerprint ridge pattern center & frequency per subject
+    for sub_id in valid_subs:
         freq = 0.12 + (sub_id % 7) * 0.015
         cx = 48 + np.sin(sub_id) * 10
         cy = 48 + np.cos(sub_id) * 10
 
-        for _ in range(samples_per_subject):
-            noise_x = np.random.uniform(-1.5, 1.5)
-            noise_y = np.random.uniform(-1.5, 1.5)
-            r = np.sqrt((x_coords - cx - noise_x)**2 + (y_coords - cy - noise_y)**2)
-            theta = np.arctan2(y_coords - cy - noise_y, x_coords - cx - noise_x)
+        # Template
+        r = np.sqrt((x_coords - cx)**2 + (y_coords - cy)**2)
+        theta = np.arctan2(y_coords - cy, x_coords - cx)
+        pat = 0.5 + 0.5 * np.cos(2 * np.pi * freq * r + 2 * theta)
+        u8_t, norm_t = preprocess_fingerprint(np.clip(pat, 0, 1).astype(np.float32))
+        templates[sub_id] = extract_fingerprint_features(u8_t, norm_t)
 
-            pattern = 0.5 + 0.5 * np.cos(2 * np.pi * freq * r + 2 * theta)
+        probes[sub_id] = []
+        for _ in range(3):
+            nx = np.random.uniform(-1.5, 1.5)
+            ny = np.random.uniform(-1.5, 1.5)
+            r_p = np.sqrt((x_coords - cx - nx)**2 + (y_coords - cy - ny)**2)
+            th_p = np.arctan2(y_coords - cy - ny, x_coords - cx - nx)
+            pat_p = 0.5 + 0.5 * np.cos(2 * np.pi * freq * r_p + 2 * th_p)
             noise = np.random.normal(0, 0.05, size)
-            img = np.clip(pattern + noise, 0, 1).astype(np.float32)
+            u8_p, norm_p = preprocess_fingerprint(np.clip(pat_p + noise, 0, 1).astype(np.float32))
+            probes[sub_id].append(extract_fingerprint_features(u8_p, norm_p))
 
-            u8, norm = preprocess_fingerprint(img)
-            feat = extract_fingerprint_features(u8, norm)
-            features.append(feat)
-            labels.append(sub_id)
+    return templates, probes, valid_subs, None, None
 
-    return np.array(features), np.array(labels)
-
-def prepare_fingerprint_trials(features, labels, enrolled_ids, impostor_ids, samples_per_user=10, enroll_count=5, seed=42):
+def generate_trial_pairs(subjects, templates, probes, impostor_ratio=1.0, seed=42):
+    """
+    Builds biometric comparison trials (genuine and impostor pairs):
+    - Genuine: abs(probe_finger_i - template_finger_i) -> y = 1
+    - Impostor: abs(probe_finger_j - template_finger_i) (j != i) -> y = 0
+    """
     rng = np.random.RandomState(seed)
-    templates = {}
-    for uid in enrolled_ids:
-        idxs = np.where(labels == uid)[0][:enroll_count]
-        templates[uid] = np.mean(features[idxs], axis=0)
+    X, y = [], []
 
-    X_pairs, y_pairs = [], []
-    for uid in enrolled_ids:
-        t = templates[uid]
-        gen_idxs = np.where(labels == uid)[0][enroll_count:samples_per_user]
-        for idx in gen_idxs:
-            X_pairs.append(np.abs(features[idx] - t))
-            y_pairs.append(1)
+    for s in subjects:
+        # Genuine comparisons
+        for pf in probes[s]:
+            X.append(np.abs(pf - templates[s]))
+            y.append(1)
 
-        imp_pool = np.where(np.isin(labels, impostor_ids))[0]
-        chosen_imps = rng.choice(imp_pool, size=len(gen_idxs), replace=False)
-        for idx in chosen_imps:
-            X_pairs.append(np.abs(features[idx] - t))
-            y_pairs.append(0)
+        # Impostor comparisons
+        other_subs = [x for x in subjects if x != s]
+        n_imp = int(len(probes[s]) * impostor_ratio)
+        imp_choices = rng.choice(other_subs, size=n_imp, replace=False)
+        for imp_s in imp_choices:
+            chosen_probe = probes[imp_s][rng.randint(0, len(probes[imp_s]))]
+            X.append(np.abs(chosen_probe - templates[s]))
+            y.append(0)
 
-    return np.array(X_pairs), np.array(y_pairs), templates
+    return np.array(X, dtype=np.float32), np.array(y, dtype=np.int32)
 
 def main():
     os.makedirs("saved_models", exist_ok=True)
+    os.makedirs(os.path.join("demo_assets", "fingerprints"), exist_ok=True)
+
     print("\n======================================================================")
     print("      TASK 2: FINGERPRINT VERIFICATION MODULE (SOCOFing)")
     print("======================================================================")
 
-    features, labels = load_socofing_images(max_subjects=40, samples_per_subject=10)
-    print(f"[Task 2] Extracted features shape: {features.shape} (Gabor + HOG + LBP)")
+    templates, probes, valid_subs, real_imgs, probe_imgs = load_socofing_dataset(n_subjects=80, seed=42)
+    feat_dim = len(next(iter(templates.values())))
+    print(f"[Task 2] Extracted features shape: {feat_dim} dims (Gabor + HOG + LBP)")
 
-    train_ids = np.arange(0, 28)
-    test_known_ids = np.arange(28, 35)
-    test_unknown_ids = np.arange(35, 40)
-    test_impostors = np.concatenate([test_known_ids, test_unknown_ids])
+    # 70% Train subjects, 30% Unseen Test subjects
+    n_train = int(len(valid_subs) * 0.70)
+    train_subs = valid_subs[:n_train]
+    test_subs = valid_subs[n_train:]
+    print(f"[Task 2] Subject split: {len(train_subs)} train identities, {len(test_subs)} unseen test identities.")
 
-    X_train, y_train, _ = prepare_fingerprint_trials(
-        features, labels, enrolled_ids=train_ids, impostor_ids=train_ids, seed=42
-    )
+    X_train, y_train = generate_trial_pairs(train_subs, templates, probes, impostor_ratio=1.0, seed=42)
+    X_test, y_test = generate_trial_pairs(test_subs, templates, probes, impostor_ratio=1.0, seed=123)
+    print(f"[Task 2] Trial pairs -> Train: {X_train.shape[0]} ({np.sum(y_train==1)} genuine, {np.sum(y_train==0)} impostor)")
+    print(f"[Task 2] Trial pairs -> Test:  {X_test.shape[0]} ({np.sum(y_test==1)} genuine, {np.sum(y_test==0)} impostor)")
 
-    X_test, y_test, test_templates = prepare_fingerprint_trials(
-        features, labels, enrolled_ids=test_known_ids, impostor_ids=test_impostors, seed=42
-    )
-
+    # Build calibrated machine learning pipelines with StandardScaler
     models = {
-        "SVM (RBF)": SVC(kernel='rbf', C=10.0, probability=True, random_state=42),
-        "Random Forest": RandomForestClassifier(n_estimators=100, max_depth=8, random_state=42)
+        "SVM (RBF)": Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", SVC(kernel="rbf", C=1.0, probability=True, random_state=42))
+        ]),
+        "Random Forest": Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", RandomForestClassifier(n_estimators=100, max_depth=8, random_state=42))
+        ])
     }
 
     best_model_name = None
     best_eer = 1.0
     best_bundle = None
 
-    for name, model in models.items():
+    for name, pipeline in models.items():
         print(f"\n--- Training {name} ---")
-        model.fit(X_train, y_train)
+        pipeline.fit(X_train, y_train)
 
-        test_probs = model.predict_proba(X_test)[:, 1]
+        test_probs = pipeline.predict_proba(X_test)[:, 1]
         eer, opt_thresh = compute_eer(y_test, test_probs)
         metrics = compute_metrics(y_test, test_probs, threshold=opt_thresh)
 
@@ -151,37 +200,53 @@ def main():
         print(f"  AUC:       {metrics['auc']:.4f}")
         print(f"  Confusion Matrix:\n{metrics['cm']}")
 
-        if eer < best_eer:
+        if eer < best_eer or (eer == best_eer and name == "SVM (RBF)"):
             best_eer = eer
             best_model_name = name
             best_bundle = {
-                "model": model,
+                "model": pipeline,
                 "model_name": name,
                 "threshold": opt_thresh,
-                "templates": test_templates
+                "templates": {s: templates[s] for s in test_subs}
             }
 
-    # Enroll team members (1000 Ahmed, 1001 Mohamed)
-    rng_fp = np.random.RandomState(42)
-    size_fp = (96, 96)
-    yc, xc = np.mgrid[0:96, 0:96]
-    for uid in [1000, 1001]:
-        freq = 0.10 + (uid % 5) * 0.02
-        cx = 48 + np.sin(uid) * 12
-        cy = 48 + np.cos(uid) * 12
-        feats = []
-        for _ in range(8):
-            nx = rng_fp.uniform(-1.5, 1.5)
-            ny = rng_fp.uniform(-1.5, 1.5)
-            r = np.sqrt((xc - cx - nx)**2 + (yc - cy - ny)**2)
-            th = np.arctan2(yc - cy - ny, xc - cx - nx)
+    # Enroll Team Members: Ahmed (1000) and Mohamed (1001)
+    # Map them to real reference fingerprint templates and export demo assets
+    if real_imgs is not None and len(real_imgs) >= 3:
+        # User 1000 (Ahmed) mapped to subject 1
+        s_ahmed = valid_subs[0]
+        best_bundle["templates"][1000] = templates[s_ahmed]
+        shutil.copy2(real_imgs[s_ahmed], os.path.join("demo_assets", "fingerprints", "fp_1000.png"))
+        if probe_imgs and s_ahmed in probe_imgs and len(probe_imgs[s_ahmed]) > 0:
+            shutil.copy2(probe_imgs[s_ahmed][0], os.path.join("demo_assets", "fingerprints", "fp_1000_probe.png"))
+
+        # User 1001 (Mohamed) mapped to subject 2
+        s_mohamed = valid_subs[1]
+        best_bundle["templates"][1001] = templates[s_mohamed]
+        shutil.copy2(real_imgs[s_mohamed], os.path.join("demo_assets", "fingerprints", "fp_1001.png"))
+        if probe_imgs and s_mohamed in probe_imgs and len(probe_imgs[s_mohamed]) > 0:
+            shutil.copy2(probe_imgs[s_mohamed][0], os.path.join("demo_assets", "fingerprints", "fp_1001_probe.png"))
+
+        # Impostor fingerprint for testing
+        s_imp = valid_subs[2]
+        shutil.copy2(real_imgs[s_imp], os.path.join("demo_assets", "fingerprints", "fp_impostor.png"))
+        print("[Task 2] Enrolled Ahmed (1000) and Mohamed (1001) using real SOCOFing fingerprint templates.")
+        print("[Task 2] Exported demo fingerprint files to demo_assets/fingerprints/ (fp_1000.png, fp_1001.png, fp_impostor.png)")
+    else:
+        rng_fp = np.random.RandomState(42)
+        size_fp = (96, 96)
+        yc, xc = np.mgrid[0:96, 0:96]
+        for uid in [1000, 1001]:
+            freq = 0.10 + (uid % 5) * 0.02
+            cx = 48 + np.sin(uid) * 12
+            cy = 48 + np.cos(uid) * 12
+            r = np.sqrt((xc - cx)**2 + (yc - cy)**2)
+            th = np.arctan2(yc - cy, xc - cx)
             pat = 0.5 + 0.5 * np.cos(2 * np.pi * freq * r + 2 * th)
-            noise = rng_fp.normal(0, 0.04, size_fp)
-            img = np.clip(pat + noise, 0, 1).astype(np.float32)
-            u8, norm = preprocess_fingerprint(img)
-            feats.append(extract_fingerprint_features(u8, norm))
-        best_bundle["templates"][uid] = np.mean(feats, axis=0)
-        print(f"[Task 2] Enrolled team fingerprint template for ID {uid}")
+            u8, norm = preprocess_fingerprint(np.clip(pat, 0, 1).astype(np.float32))
+            best_bundle["templates"][uid] = extract_fingerprint_features(u8, norm)
+            cv2.imwrite(os.path.join("demo_assets", "fingerprints", f"fp_{uid}.png"), u8)
+            print(f"[Task 2] Enrolled team fingerprint template for ID {uid}")
 
     save_path = os.path.join("saved_models", "fingerprint_verifier.pkl")
     joblib.dump(best_bundle, save_path)
