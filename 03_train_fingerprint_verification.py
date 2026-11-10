@@ -9,12 +9,26 @@ from sklearn.ensemble import RandomForestClassifier
 from fingerprint_features import preprocess_fingerprint, extract_fingerprint_features
 from metrics import compute_metrics, compute_eer
 
-SOCOFING_DIR = os.path.join("data", "socofing", "SOCOFing", "Real")
+SOCOFING_CANDIDATES = [
+    os.path.join("data", "socofing", "SOCOFing", "Real"),
+    os.path.join("data", "socofing", "Real"),
+    os.path.join("data", "SOCOFing", "Real"),
+    os.path.join("data", "socofing"),
+]
+
+def get_socofing_dir():
+    for candidate in SOCOFING_CANDIDATES:
+        if os.path.exists(candidate):
+            files = glob.glob(os.path.join(candidate, "*.BMP")) + glob.glob(os.path.join(candidate, "*.bmp"))
+            if len(files) > 0:
+                return candidate
+    return None
 
 def load_socofing_images(max_subjects=40, samples_per_subject=10):
     """Loads SOCOFing images from disk if present, else generates high-quality synthetic fingerprint data."""
-    if os.path.exists(SOCOFING_DIR):
-        files = glob.glob(os.path.join(SOCOFING_DIR, "*.BMP"))
+    socofing_dir = get_socofing_dir()
+    if socofing_dir is not None:
+        files = glob.glob(os.path.join(socofing_dir, "*.BMP")) + glob.glob(os.path.join(socofing_dir, "*.bmp"))
         if len(files) > 0:
             print(f"[Task 2] Found {len(files)} SOCOFing images on disk.")
             subject_dict = {}
